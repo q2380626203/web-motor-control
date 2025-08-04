@@ -1,0 +1,48 @@
+# Build files
+build/
+*.bin
+*.elf
+*.map
+
+# IDE files
+.vscode/
+*.workspace
+*.project
+.settings/
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+
+# Test results and data files
+test_results_*.csv
+precision_analysis_*.png
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# ESP-IDF specific
+sdkconfig.old
+dependencies.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual environment
+.env
+
+# OS specific
+*.swp
+*.swo
