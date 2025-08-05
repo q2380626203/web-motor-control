@@ -61,7 +61,7 @@ class EncoderStabilityDetector:
         self.stability_samples = stability_samples  # 连续稳定样本数
         self.max_wait_time = max_wait_time  # 最大等待时间(秒)
         
-    def wait_for_stability(self, encoder_reader):
+    def wait_for_stability(self, encoder_reader, stop_callback=None):
         """
         等待编码器角度小数点后3位稳定
         返回: (是否稳定, 稳定角度值)
@@ -71,6 +71,10 @@ class EncoderStabilityDetector:
         stable_readings = []
         
         while time.time() - start_time < self.max_wait_time:
+            # 检查是否需要停止
+            if stop_callback and stop_callback():
+                logger.info("编码器稳定性检测被中断")
+                return False, None
             try:
                 position, angle, counting_error = encoder_reader.read_position()
                 if counting_error:
@@ -107,7 +111,7 @@ class EncoderStabilityDetector:
 class MotorPrecisionTester:
     """电机精度测试器"""
     
-    def __init__(self, encoder_port='COM43', esp32_ip="192.168.4.1", reduction_ratio=19.24, enable_plot=False):
+    def __init__(self, encoder_port='COM43', esp32_ip="192.168.4.1", reduction_ratio=19.24, internal_motor_param=8, enable_plot=False):
         # 初始化组件
         self.motor_controller = MotorController(esp32_ip)
         self.encoder_reader = TamagawaEncoderReader(encoder_port)
@@ -119,7 +123,11 @@ class MotorPrecisionTester:
         
         # 减速比配置
         self.reduction_ratio = reduction_ratio
-        self.theoretical_step = (360 / reduction_ratio / 8) * 0.8  # 理论步长
+        self.internal_motor_param = internal_motor_param
+        self.theoretical_step = (360 / reduction_ratio / internal_motor_param) * 0.8  # 理论步长
+        
+        # 用户说明文本（用于文件命名）
+        self.user_description = "测试"
         
         # 数据存储
         self.test_results = []
@@ -133,9 +141,17 @@ class MotorPrecisionTester:
         self.line = None
         self.plot_thread = None
         
+        # 控制标志
+        self.stop_requested = False
+        
     def calculate_theoretical_angle(self, position):
         """计算理论角度"""
-        return position * (360 / self.reduction_ratio) / 8.0
+        return position * (360 / self.reduction_ratio) / self.internal_motor_param
+    
+    def stop_test(self):
+        """停止测试"""
+        logger.info("收到停止测试请求")
+        self.stop_requested = True
     
     def setup_dynamic_plot(self):
         """设置动态绘图"""
@@ -146,7 +162,7 @@ class MotorPrecisionTester:
         self.fig, self.ax = plt.subplots(figsize=(10, 6))
         self.ax.set_xlabel('实际角度 (°)')
         self.ax.set_ylabel('角度变化误差 (°)')
-        self.ax.set_title(f'实时角度变化误差 (减速比: {self.reduction_ratio}, 理论步长: {self.theoretical_step:.5f}°)')
+        self.ax.set_title(f'实时角度变化误差 (减速比: {self.reduction_ratio}, 内部参数: {self.internal_motor_param}, 理论步长: {self.theoretical_step:.5f}°)')
         self.ax.grid(True, alpha=0.3)
         self.ax.axhline(y=0, color='k', linestyle='--', alpha=0.5)
         
@@ -181,6 +197,10 @@ class MotorPrecisionTester:
         """测试单个位置的精度"""
         logger.info(f"\n=== 测试位置: {position} ===")
         
+        # 检查是否需要停止
+        if self.stop_requested:
+            return None
+        
         # 1. 使能电机
         success, msg = self.motor_controller.enable_motor()
         if not success:
@@ -188,6 +208,11 @@ class MotorPrecisionTester:
             return None
         
         time.sleep(0.5)  # 等待使能完成
+        
+        # 检查是否需要停止
+        if self.stop_requested:
+            self.motor_controller.disable_motor()
+            return None
         
         # 2. 移动到目标位置
         success, msg = self.motor_controller.set_position(position)
@@ -197,7 +222,11 @@ class MotorPrecisionTester:
         
         # 3. 等待位置稳定
         logger.info(f"等待{self.position_stable_time}秒位置稳定...")
-        time.sleep(self.position_stable_time)
+        for i in range(int(self.position_stable_time * 10)):  # 0.1秒间隔检查
+            if self.stop_requested:
+                self.motor_controller.disable_motor()
+                return None
+            time.sleep(0.1)
         
         # 4. 失能电机
         success, msg = self.motor_controller.disable_motor()
@@ -207,7 +236,10 @@ class MotorPrecisionTester:
         time.sleep(0.5)  # 等待失能完成
         
         # 5. 等待编码器稳定并记录
-        is_stable, stable_angle = self.stability_detector.wait_for_stability(self.encoder_reader)
+        is_stable, stable_angle = self.stability_detector.wait_for_stability(
+            self.encoder_reader, 
+            stop_callback=lambda: self.stop_requested
+        )
         
         if is_stable:
             # 计算角度变化误差（除了第一个点）
@@ -240,7 +272,7 @@ class MotorPrecisionTester:
     def run_test(self):
         """运行完整的精度测试"""
         logger.info("=== 开始电机精度测试 ===")
-        logger.info(f"减速比: {self.reduction_ratio}, 理论步长: {self.theoretical_step:.5f}°")
+        logger.info(f"减速比: {self.reduction_ratio}, 内部电机参数: {self.internal_motor_param}, 理论步长: {self.theoretical_step:.5f}°")
         logger.info(f"测试位置点: {len(self.test_positions)}个点")
         
         # 设置动态绘图
@@ -258,6 +290,11 @@ class MotorPrecisionTester:
         try:
             # 逐个测试每个位置
             for i, position in enumerate(self.test_positions):
+                # 检查是否需要停止
+                if self.stop_requested:
+                    logger.info("测试被用户停止")
+                    break
+                    
                 logger.info(f"\n进度: {i+1}/{len(self.test_positions)}")
                 
                 result = self.test_single_position(position)
@@ -266,16 +303,26 @@ class MotorPrecisionTester:
                 else:
                     logger.warning(f"位置 {position} 测试失败，跳过")
                 
+                # 检查是否需要停止（在等待间隔前再次检查）
+                if self.stop_requested:
+                    logger.info("测试被用户停止")
+                    break
+                
                 # 测试间隔
                 if i < len(self.test_positions) - 1:
                     time.sleep(2)
             
-            # 保存测试结果
-            self.save_results()
-            self.print_summary()
+            # 保存测试结果（即使被停止也要保存已有结果）
+            if self.test_results:
+                self.save_results()
+                self.print_summary()
             
-            logger.info("=== 精度测试完成 ===")
-            return True
+            if self.stop_requested:
+                logger.info("=== 精度测试被停止 ===")
+                return False
+            else:
+                logger.info("=== 精度测试完成 ===")
+                return True
             
         except KeyboardInterrupt:
             logger.info("测试被用户中断")
@@ -301,7 +348,8 @@ class MotorPrecisionTester:
             return
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"test_results_{timestamp}.csv"
+        user_desc = getattr(self, 'user_description', '测试')
+        filename = f"{user_desc}_{timestamp}.csv"
         
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['position', 'actual_angle']
@@ -343,17 +391,29 @@ def main():
     else:
         reduction_ratio = 19.24
     
+    # 输入内部电机参数
+    internal_motor_param_input = input("请输入内部电机参数 (默认: 8): ").strip()
+    if internal_motor_param_input:
+        try:
+            internal_motor_param = float(internal_motor_param_input)
+        except ValueError:
+            print("输入无效，使用默认值8")
+            internal_motor_param = 8
+    else:
+        internal_motor_param = 8
+    
     # 是否启用动态绘图
     plot_choice = input("是否启用实时动态绘图? (y/n, 默认: y): ").strip().lower()
     enable_plot = plot_choice != 'n'
     
     print(f"使用减速比: {reduction_ratio}")
-    theoretical_step = (360 / reduction_ratio / 8) * 0.8
+    print(f"内部电机参数: {internal_motor_param}")
+    theoretical_step = (360 / reduction_ratio / internal_motor_param) * 0.8
     print(f"理论步长: {theoretical_step:.5f}°")
     print(f"动态绘图: {'启用' if enable_plot else '禁用'}")
     
     # 创建测试器
-    tester = MotorPrecisionTester(encoder_port, esp32_ip, reduction_ratio, enable_plot)
+    tester = MotorPrecisionTester(encoder_port, esp32_ip, reduction_ratio, internal_motor_param, enable_plot)
     
     # 开始测试
     input("按回车键开始测试...")

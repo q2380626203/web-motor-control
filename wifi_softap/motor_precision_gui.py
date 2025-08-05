@@ -1081,163 +1081,102 @@ class MotorPrecisionGUI:
         ax.axis('off')  # 隐藏坐标轴
         
         # 准备参数数据
-        reduction_ratio = self.reduction_ratio.get()
-        internal_param = self.internal_motor_param.get()
-        theoretical_step = (360 / float(reduction_ratio) / float(internal_param)) * float(self.step_interval.get())
-        
         params_data = [
-            ['外部减速比', reduction_ratio],
-            ['内部电机参数', internal_param],
-            ['步长间隔', self.step_interval.get()],
-            ['理论步长', f"{theoretical_step:.5f}°"],
-            ['起始位置', self.start_pos.get()],
+            ['参数名称', '数值'],
+            ['外部减速比', f"{self.reduction_ratio.get()}"],
+            ['内部电机参数', f"{self.internal_motor_param.get()}"],
+            ['起始位置', f"{self.start_pos.get()}"],
             ['目标角度范围', f"{self.target_angle_range.get()}°"],
-            ['测试点数', str(len(self.real_time_data['angles']))],
-            ['ESP32 IP', self.esp32_ip.get()],
-            ['编码器串口', self.encoder_port.get()]
+            ['步长间隔', f"{self.step_interval.get()}"],
+            ['ESP32 IP', f"{self.esp32_ip.get()}"],
+            ['编码器串口', f"{self.encoder_port.get()}"],
+            ['测试点数', f"{len(self.real_time_data['angles'])}"]
         ]
         
         # 创建表格
-        table = ax.table(cellText=params_data,
-                        colLabels=['参数名称', '参数值'],
-                        cellLoc='left',
-                        loc='center',
-                        colWidths=[0.6, 0.4])
-        
-        # 设置表格样式
+        table = ax.table(cellText=params_data, loc='center', cellLoc='left')
         table.auto_set_font_size(False)
         table.set_fontsize(9)
-        table.scale(1, 2)
+        table.scale(1, 1.8)
         
-        # 设置表头样式
-        for i in range(2):
-            table[(0, i)].set_facecolor('#4CAF50')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
-        # 设置数据行样式
-        for i in range(1, len(params_data) + 1):
-            for j in range(2):
-                if i % 2 == 0:
-                    table[(i, j)].set_facecolor('#f0f0f0')
+        # 设置表格样式
+        for i in range(len(params_data)):
+            for j in range(len(params_data[i])):
+                cell = table[(i, j)]
+                if i == 0:  # 标题行
+                    cell.set_facecolor('#4CAF50')
+                    cell.set_text_props(weight='bold', color='white')
                 else:
-                    table[(i, j)].set_facecolor('white')
+                    cell.set_facecolor('#f0f0f0' if i % 2 == 0 else 'white')
         
         ax.set_title('测试参数', fontweight='bold', pad=20)
     
     def _plot_statistics_summary(self, ax):
         """绘制实时数据统计汇总"""
-        ax.axis('off')
+        ax.axis('off')  # 隐藏坐标轴
         
         # 计算统计数据
-        angles = self.real_time_data['angles']
         errors = self.real_time_data['errors']
         cumulative_errors = self.real_time_data['cumulative_errors']
         
-        if len(errors) == 0:
-            ax.text(0.5, 0.5, '无足够数据进行统计', ha='center', va='center', fontsize=12)
-            ax.set_title('数据统计汇总', fontweight='bold')
-            return
-        
-        # 统计计算
-        error_count_over_threshold = sum(1 for e in errors if abs(e) > 0.01)
-        avg_error = np.mean(errors)
-        std_error = np.std(errors)
-        max_error = max(errors)
-        min_error = min(errors)
-        abs_avg_error = np.mean([abs(e) for e in errors])
-        abs_max_error = max([abs(e) for e in errors])
-        
-        # 累积误差统计
-        if len(cumulative_errors) > 0:
-            final_cumulative_error = cumulative_errors[-1]
-            max_cumulative_error = max([abs(e) for e in cumulative_errors])
-        else:
-            final_cumulative_error = 0
-            max_cumulative_error = 0
-        
-        # 测试范围统计
-        angle_range = max(angles) - min(angles) if len(angles) > 0 else 0
-        
         stats_data = [
-            ['测试点总数', f"{len(angles)}"],
-            ['测试角度范围', f"{angle_range:.1f}°"],
-            ['误差>0.01°次数', f"{error_count_over_threshold}/{len(errors)}"],
-            ['平均角度误差', f"{avg_error:.4f}°"],
-            ['误差标准差', f"{std_error:.4f}°"],
-            ['最大正误差', f"{max_error:.4f}°"],
-            ['最大负误差', f"{min_error:.4f}°"],
-            ['误差绝对值平均', f"{abs_avg_error:.4f}°"],
-            ['误差绝对值最大', f"{abs_max_error:.4f}°"],
-            ['最终累积误差', f"{final_cumulative_error:.4f}°"],
-            ['最大累积误差', f"{max_cumulative_error:.4f}°"]
+            ['统计项目', '数值'],
+            ['测试点数', f"{len(self.real_time_data['angles'])}"],
+            ['误差>0.01次数', f"{self.error_count}"]
         ]
         
-        # 创建统计表格
-        table = ax.table(cellText=stats_data,
-                        colLabels=['统计项目', '数值'],
-                        cellLoc='left',
-                        loc='center',
-                        colWidths=[0.6, 0.4])
+        if errors:
+            max_error = max([abs(e) for e in errors])
+            avg_error = sum([abs(e) for e in errors]) / len(errors)
+            stats_data.extend([
+                ['最大角度误差', f"{max_error:.4f}°"],
+                ['平均角度误差', f"{avg_error:.4f}°"]
+            ])
         
-        # 设置表格样式
+        if cumulative_errors:
+            max_cum_error = max([abs(e) for e in cumulative_errors])
+            final_cum_error = cumulative_errors[-1] if cumulative_errors else 0
+            stats_data.extend([
+                ['最大累积误差', f"{max_cum_error:.4f}°"],
+                ['最终累积误差', f"{final_cum_error:.4f}°"]
+            ])
+        
+        # 创建表格
+        table = ax.table(cellText=stats_data, loc='center', cellLoc='left')
         table.auto_set_font_size(False)
-        table.set_fontsize(8)
+        table.set_fontsize(9)
         table.scale(1, 1.8)
         
-        # 设置表头样式
-        for i in range(2):
-            table[(0, i)].set_facecolor('#2196F3')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
-        # 设置数据行样式
-        for i in range(1, len(stats_data) + 1):
-            for j in range(2):
-                if i % 2 == 0:
-                    table[(i, j)].set_facecolor('#f0f0f0')
+        # 设置表格样式
+        for i in range(len(stats_data)):
+            for j in range(len(stats_data[i])):
+                cell = table[(i, j)]
+                if i == 0:  # 标题行
+                    cell.set_facecolor('#2196F3')
+                    cell.set_text_props(weight='bold', color='white')
                 else:
-                    table[(i, j)].set_facecolor('white')
-                    
-                # 高亮重要数据
-                if i == 3 and j == 1:  # 误差>0.01次数
-                    if error_count_over_threshold > len(errors) * 0.1:  # 超过10%
-                        table[(i, j)].set_facecolor('#ffcdd2')
+                    cell.set_facecolor('#f0f0f0' if i % 2 == 0 else 'white')
         
-        ax.set_title('数据统计汇总', fontweight='bold', pad=20)
+        ax.set_title('统计数据汇总', fontweight='bold', pad=20)
     
     def _plot_user_description(self, ax):
-        """绘制用户说明文本区域"""
-        ax.axis('off')
+        """绘制用户说明文本"""
+        ax.axis('off')  # 隐藏坐标轴
         
-        # 获取用户说明和测试信息
-        user_desc = self.user_description.get().strip() or "无说明"
+        user_desc = self.user_description.get().strip()
+        if not user_desc:
+            user_desc = "无说明文本"
         
-        # 创建说明文本内容
-        description_text = f"""用户说明：
-{user_desc}
-
-测试配置：
-• 外部减速比：{self.reduction_ratio.get()}
-• 内部电机参数：{self.internal_motor_param.get()}
-• 步长间隔：{self.step_interval.get()}
-• 起始位置：{self.start_pos.get()}
-• 目标角度范围：{self.target_angle_range.get()}°
-
-连接信息：
-• ESP32 IP：{self.esp32_ip.get()}
-• 编码器串口：{self.encoder_port.get()}
-
-报告生成时间：
-{datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}"""
+        # 添加说明文本
+        ax.text(0.5, 0.5, user_desc, ha='center', va='center', 
+                fontsize=12, wrap=True, 
+                bbox=dict(boxstyle="round,pad=0.5", facecolor='lightyellow', alpha=0.8))
         
-        # 显示文本
-        ax.text(0.05, 0.95, description_text, 
-               fontsize=10, 
-               verticalalignment='top',
-               horizontalalignment='left',
-               transform=ax.transAxes,
-               bbox=dict(boxstyle="round,pad=0.5", facecolor='#e8f5e8', alpha=0.8))
-        
-        ax.set_title('测试说明信息', fontweight='bold', pad=20)
+        ax.set_title('用户说明', fontweight='bold', pad=20)
+    
+    def generate_report_button_clicked(self):
+        """手动生成测试报告按钮点击事件"""
+        self.generate_test_report(auto_save=False)
                 
     def on_closing(self):
         """窗口关闭事件"""

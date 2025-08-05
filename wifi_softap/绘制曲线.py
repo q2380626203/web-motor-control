@@ -156,6 +156,8 @@ class MotorPrecisionAnalyzer:
         ax3.set_xlabel('实际角度 (°)')
         ax3.set_ylabel('角度变化误差 (°)')
         ax3.set_title('角度变化与步长的误差值')
+        ax3.set_xlim(0, 360)  # x轴固定360度最大
+        ax3.set_ylim(-0.01, 0.01)  # y轴固定0.01最大
         ax3.grid(True, alpha=0.3)
         
         # 图4: 累积误差
