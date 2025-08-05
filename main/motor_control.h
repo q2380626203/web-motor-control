@@ -27,7 +27,6 @@ typedef struct {
 typedef struct {
     motor_driver_config_t driver_config;   // 驱动配置
     bool motor_enabled;                    // 电机使能状态
-    float velocity_limit;                  // 电机最大速度限制
 } motor_controller_t;
 
 // ====================================================================================
@@ -37,11 +36,9 @@ typedef struct {
 /**
  * @brief 初始化电机控制器
  * @param driver_config 驱动配置
- * @param velocity_limit 速度限制
  * @return 电机控制器句柄，失败返回NULL
  */
-motor_controller_t* motor_control_init(const motor_driver_config_t* driver_config, 
-                                      float velocity_limit);
+motor_controller_t* motor_control_init(const motor_driver_config_t* driver_config);
 
 /**
  * @brief 销毁电机控制器
@@ -79,7 +76,7 @@ void motor_control_set_position_mode(motor_controller_t* controller);
 /**
  * @brief 设置电机目标位置
  * @param controller 电机控制器句柄
- * @param position 目标位置 (8.0代表减速器输出轴转动18.711019度)
+ * @param position 目标位置 
  */
 void motor_control_set_position(motor_controller_t* controller, float position);
 
@@ -129,7 +126,7 @@ void set_motor_position_mode(uart_port_t uart_port);
 /**
  * @brief 发送目标位置
  * @param uart_port UART端口
- * @param position 目标位置 (8.0代表减速器输出轴转动18.711019度)
+ * @param position 目标位置 
  */
 void send_target_position(uart_port_t uart_port, float position);
 

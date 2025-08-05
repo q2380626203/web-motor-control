@@ -34,8 +34,7 @@ static void send_serial_can_frame(uart_port_t uart_port, const char* cmd_name,
 // --- 电机控制器主要接口实现 ---
 // ====================================================================================
 
-motor_controller_t* motor_control_init(const motor_driver_config_t* driver_config, 
-                                      float velocity_limit) {
+motor_controller_t* motor_control_init(const motor_driver_config_t* driver_config) {
     if (!driver_config) {
         printf("[错误] 电机控制器配置参数为空！\n");
         return NULL;
@@ -50,7 +49,6 @@ motor_controller_t* motor_control_init(const motor_driver_config_t* driver_confi
 
     // 复制配置
     memcpy(&controller->driver_config, driver_config, sizeof(motor_driver_config_t));
-    controller->velocity_limit = velocity_limit;
 
     // 初始化电机状态
     controller->motor_enabled = false;
@@ -73,8 +71,8 @@ motor_controller_t* motor_control_init(const motor_driver_config_t* driver_confi
     // 初始化电机（不设置模式，等待后续配置）
     printf("[信息] 电机UART已配置，等待模式设置\n");
 
-    printf("[信息] 电机控制器在 UART%d 上初始化完成，速度限制: %.2f r/s\n", 
-           driver_config->uart_port, velocity_limit);
+    printf("[信息] 电机控制器在 UART%d 上初始化完成\n", 
+           driver_config->uart_port);
     return controller;
 }
 
@@ -117,10 +115,6 @@ void motor_control_set_velocity_mode(motor_controller_t* controller) {
 
 void motor_control_set_velocity(motor_controller_t* controller, float velocity) {
     if (!controller) return;
-
-    // 限制电机速度在设定范围内
-    if (velocity > controller->velocity_limit) velocity = controller->velocity_limit;
-    if (velocity < -controller->velocity_limit) velocity = -controller->velocity_limit;
 
     send_target_velocity(controller->driver_config.uart_port, velocity);
     printf("[信息] 电机目标速度设置为: %.2f r/s\n", velocity);
