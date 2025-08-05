@@ -8,6 +8,11 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
+// 外部函数声明
+extern float angle_to_position(float angle_degrees);
+extern float external_velocity_to_internal(float external_velocity);
+extern float external_torque_to_internal(float external_torque);
+
 /* WiFi配置 */
 #define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
 #define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
@@ -105,12 +110,13 @@ static esp_err_t set_angle_handler(httpd_req_t *req) {
         char angle_str[32];
         if (httpd_query_key_value(query, "value", angle_str, sizeof(angle_str)) == ESP_OK) {
             float angle = atof(angle_str);
-            float position = angle;
+            // 使用角度映射函数进行转换
+            float position = angle_to_position(angle);
             
             if (g_motor_controller) {
                 motor_control_set_position(g_motor_controller, position);
                 char response[100];
-                snprintf(response, sizeof(response), "位置值: %.3f", position);
+                snprintf(response, sizeof(response), "角度: %.1f° -> 位置值: %.3f", angle, position);
                 httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
                 return ESP_OK;
             }
@@ -202,12 +208,15 @@ static esp_err_t set_velocity_handler(httpd_req_t *req) {
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char vel_str[32];
         if (httpd_query_key_value(query, "value", vel_str, sizeof(vel_str)) == ESP_OK) {
-            float velocity = atof(vel_str);
+            float external_velocity = atof(vel_str);
+            // 转换为内部电机速度
+            float internal_velocity = external_velocity_to_internal(external_velocity);
             
             if (g_motor_controller) {
-                motor_control_set_velocity(g_motor_controller, velocity);
-                char response[100];
-                snprintf(response, sizeof(response), "速度设置成功: %.2f r/s", velocity);
+                motor_control_set_velocity(g_motor_controller, internal_velocity);
+                char response[120];
+                snprintf(response, sizeof(response), "外部速度: %.2f r/s -> 内部速度: %.2f r/s", 
+                        external_velocity, internal_velocity);
                 httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
                 return ESP_OK;
             }
@@ -222,12 +231,15 @@ static esp_err_t set_torque_handler(httpd_req_t *req) {
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char torque_str[32];
         if (httpd_query_key_value(query, "value", torque_str, sizeof(torque_str)) == ESP_OK) {
-            float torque = atof(torque_str);
+            float external_torque = atof(torque_str);
+            // 转换为内部电机力矩
+            float internal_torque = external_torque_to_internal(external_torque);
             
             if (g_motor_controller) {
-                motor_control_set_torque(g_motor_controller, torque);
-                char response[100];
-                snprintf(response, sizeof(response), "力矩设置成功: %.2f Nm", torque);
+                motor_control_set_torque(g_motor_controller, internal_torque);
+                char response[120];
+                snprintf(response, sizeof(response), "外部力矩: %.3f Nm -> 内部力矩: %.3f Nm", 
+                        external_torque, internal_torque);
                 httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
                 return ESP_OK;
             }
