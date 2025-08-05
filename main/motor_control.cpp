@@ -7,9 +7,6 @@
 // --- 常量定义 ---
 // ====================================================================================
 
-// 减速机换算关系: 8.0 位置值 = 18.711019 度
-#define POSITION_TO_DEGREE_RATIO    (18.711019f / 8.0f)  // 2.3388774度/位置值
-#define DEGREE_TO_POSITION_RATIO    (8.0f / 18.711019f)  // 0.4276058位置值/度
 
 // CAN 指令 ID
 #define ENABLE_ID           0x0027
@@ -17,6 +14,8 @@
 #define TARGET_VEL_ID       0x002D      // 发送目标速度的 CAN ID
 #define POS_MODE_ID         0x002B      // 设置位置模式的 CAN ID
 #define TARGET_POS_ID       0x002C      // 发送目标位置的 CAN ID
+#define TORQUE_MODE_ID      0x002B      // 设置力矩模式的 CAN ID
+#define TARGET_TORQUE_ID    0x002E      // 发送目标力矩的 CAN ID
 #define CLEAR_ERROR_ID      0x0038      // 清除错误和异常的 CAN ID
 
 // CAN 指令数据
@@ -24,6 +23,7 @@ static const uint8_t ENABLE_DATA[]      = {0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0
 static const uint8_t DISABLE_DATA[]     = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 失能马达
 static const uint8_t VEL_DIRECT_MODE_DATA[] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}; // 速度直接模式数据
 static const uint8_t POS_DATA[]         = {0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}; // 进入位置斜坡模式
+static const uint8_t TORQUE_DIRECT_MODE_DATA[] = {0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}; // 力矩直接模式数据
 static const uint8_t CLEAR_ERROR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 清除错误和异常数据
 
 // 内部函数声明
@@ -107,11 +107,23 @@ void motor_control_enable(motor_controller_t* controller, bool enable) {
     }
 }
 
+
+void motor_control_set_velocity_mode(motor_controller_t* controller) {
+    if (!controller) return;
+
+    set_motor_velocity_mode(controller->driver_config.uart_port);
+    printf("[信息] 电机已设置为速度模式\n");
+}
+
 void motor_control_set_velocity(motor_controller_t* controller, float velocity) {
     if (!controller) return;
 
-    move_motor_to_velocity(controller->driver_config.uart_port, 
-                          velocity, controller->velocity_limit);
+    // 限制电机速度在设定范围内
+    if (velocity > controller->velocity_limit) velocity = controller->velocity_limit;
+    if (velocity < -controller->velocity_limit) velocity = -controller->velocity_limit;
+
+    send_target_velocity(controller->driver_config.uart_port, velocity);
+    printf("[信息] 电机目标速度设置为: %.2f r/s\n", velocity);
 }
 
 void motor_control_set_position_mode(motor_controller_t* controller) {
@@ -125,17 +137,23 @@ void motor_control_set_position(motor_controller_t* controller, float position) 
     if (!controller) return;
 
     send_target_position(controller->driver_config.uart_port, position);
-    float angle = motor_position_to_angle(position);
-    printf("[信息] 电机目标位置设置为: %.2f (%.2f度)\n", position, angle);
+    printf("[信息] 电机目标位置设置为: %.2f\n", position);
 }
 
-float motor_angle_to_position(float angle_degrees) {
-    return angle_degrees * DEGREE_TO_POSITION_RATIO;
+void motor_control_set_torque_mode(motor_controller_t* controller) {
+    if (!controller) return;
+
+    set_motor_torque_mode(controller->driver_config.uart_port);
+    printf("[信息] 电机已设置为力矩模式\n");
 }
 
-float motor_position_to_angle(float position) {
-    return position * POSITION_TO_DEGREE_RATIO;
+void motor_control_set_torque(motor_controller_t* controller, float torque) {
+    if (!controller) return;
+
+    send_target_torque(controller->driver_config.uart_port, torque);
+    printf("[信息] 电机目标力矩设置为: %.2f Nm\n", torque);
 }
+
 
 void motor_control_clear_errors(motor_controller_t* controller) {
     if (!controller) return;
@@ -180,6 +198,22 @@ void send_target_position(uart_port_t uart_port, float position) {
     send_serial_can_frame(uart_port, "设置目标位置", TARGET_POS_ID, can_data, sizeof(can_data));
 }
 
+void send_target_velocity(uart_port_t uart_port, float velocity) {
+    uint8_t can_data[8] = {0};
+    memcpy(can_data, &velocity, sizeof(velocity)); // Copy float velocity to CAN data
+    send_serial_can_frame(uart_port, "设置目标速度", TARGET_VEL_ID, can_data, sizeof(can_data));
+}
+
+void set_motor_torque_mode(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "设置力矩模式", TORQUE_MODE_ID, TORQUE_DIRECT_MODE_DATA, sizeof(TORQUE_DIRECT_MODE_DATA));
+}
+
+void send_target_torque(uart_port_t uart_port, float torque) {
+    uint8_t can_data[8] = {0};
+    memcpy(can_data, &torque, sizeof(torque)); // Copy float torque to CAN data
+    send_serial_can_frame(uart_port, "设置目标力矩", TARGET_TORQUE_ID, can_data, sizeof(can_data));
+}
+
 void enable_motor(uart_port_t uart_port) {
     send_serial_can_frame(uart_port, "致能马达", ENABLE_ID, ENABLE_DATA, sizeof(ENABLE_DATA));
 }
@@ -188,15 +222,6 @@ void disable_motor(uart_port_t uart_port) {
     send_serial_can_frame(uart_port, "失能马达", ENABLE_ID, DISABLE_DATA, sizeof(DISABLE_DATA));
 }
 
-void move_motor_to_velocity(uart_port_t uart_port, float velocity, float velocity_limit) {
-    // 限制电机速度在设定范围内
-    if (velocity > velocity_limit) velocity = velocity_limit;
-    if (velocity < -velocity_limit) velocity = -velocity_limit;
-
-    uint8_t can_data[8] = {0};
-    memcpy(can_data, &velocity, sizeof(velocity)); // Copy float velocity to CAN data
-    send_serial_can_frame(uart_port, "MoveToVelocity", TARGET_VEL_ID, can_data, sizeof(can_data));
-}
 
 void clear_motor_errors(uart_port_t uart_port) {
     send_serial_can_frame(uart_port, "清除错误和异常", CLEAR_ERROR_ID, CLEAR_ERROR_DATA, sizeof(CLEAR_ERROR_DATA));

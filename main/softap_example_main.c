@@ -198,7 +198,7 @@ static esp_err_t set_angle_handler(httpd_req_t *req) {
         char angle_str[32];
         if (httpd_query_key_value(query, "value", angle_str, sizeof(angle_str)) == ESP_OK) {
             float angle = atof(angle_str);
-            float position = motor_angle_to_position(angle);
+            float position = angle;
             
             if (motor_controller) {
                 motor_control_set_position(motor_controller, position);
@@ -222,7 +222,7 @@ static esp_err_t set_position_handler(httpd_req_t *req) {
             
             if (motor_controller) {
                 motor_control_set_position(motor_controller, position);
-                float angle = motor_position_to_angle(position);
+                float angle = position;
                 char response[100];
                 snprintf(response, sizeof(response), "角度: %.3f°", angle);
                 httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);

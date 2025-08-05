@@ -56,8 +56,15 @@ void motor_control_deinit(motor_controller_t* controller);
  */
 void motor_control_enable(motor_controller_t* controller, bool enable);
 
+
 /**
- * @brief 直接设置电机速度
+ * @brief 设置电机速度模式
+ * @param controller 电机控制器句柄
+ */
+void motor_control_set_velocity_mode(motor_controller_t* controller);
+
+/**
+ * @brief 设置电机目标速度
  * @param controller 电机控制器句柄
  * @param velocity 目标速度 (r/s)
  */
@@ -77,18 +84,18 @@ void motor_control_set_position_mode(motor_controller_t* controller);
 void motor_control_set_position(motor_controller_t* controller, float position);
 
 /**
- * @brief 角度转换为位置值
- * @param angle_degrees 角度 (度)
- * @return 位置值 (8.0 = 18.711019度)
+ * @brief 设置电机力矩模式
+ * @param controller 电机控制器句柄
  */
-float motor_angle_to_position(float angle_degrees);
+void motor_control_set_torque_mode(motor_controller_t* controller);
 
 /**
- * @brief 位置值转换为角度
- * @param position 位置值
- * @return 角度 (度)
+ * @brief 设置电机目标力矩
+ * @param controller 电机控制器句柄
+ * @param torque 目标力矩 (Nm)
  */
-float motor_position_to_angle(float position);
+void motor_control_set_torque(motor_controller_t* controller, float torque);
+
 
 /**
  * @brief 清除电机错误和异常
@@ -127,6 +134,26 @@ void set_motor_position_mode(uart_port_t uart_port);
 void send_target_position(uart_port_t uart_port, float position);
 
 /**
+ * @brief 发送目标速度
+ * @param uart_port UART端口
+ * @param velocity 目标速度 (r/s)
+ */
+void send_target_velocity(uart_port_t uart_port, float velocity);
+
+/**
+ * @brief 设置电机为力矩模式
+ * @param uart_port UART端口
+ */
+void set_motor_torque_mode(uart_port_t uart_port);
+
+/**
+ * @brief 发送目标力矩
+ * @param uart_port UART端口
+ * @param torque 目标力矩 (Nm)
+ */
+void send_target_torque(uart_port_t uart_port, float torque);
+
+/**
  * @brief 使能电机
  * @param uart_port UART端口
  */
@@ -138,13 +165,6 @@ void enable_motor(uart_port_t uart_port);
  */
 void disable_motor(uart_port_t uart_port);
 
-/**
- * @brief 移动电机到指定速度
- * @param uart_port UART端口
- * @param velocity 目标速度 (r/s)
- * @param velocity_limit 速度限制
- */
-void move_motor_to_velocity(uart_port_t uart_port, float velocity, float velocity_limit);
 
 /**
  * @brief 清除电机错误和异常
