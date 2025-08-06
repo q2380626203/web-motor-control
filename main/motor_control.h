@@ -169,6 +169,43 @@ void disable_motor(uart_port_t uart_port);
  */
 void clear_motor_errors(uart_port_t uart_port);
 
+/**
+ * @brief 重启电机
+ * @param uart_port UART端口
+ */
+void restart_motor(uart_port_t uart_port);
+
+/**
+ * @brief 查询电机目标力矩和当前力矩
+ * @param uart_port UART端口
+ */
+void query_motor_torque(uart_port_t uart_port);
+
+/**
+ * @brief 查询电机电功率和机械功率
+ * @param uart_port UART端口
+ */
+void query_motor_power(uart_port_t uart_port);
+
+/**
+ * @brief 查询编码器多圈计数和单圈计数
+ * @param uart_port UART端口
+ */
+void query_encoder_count(uart_port_t uart_port);
+
+/**
+ * @brief 查询电机异常信息
+ * @param uart_port UART端口
+ * @param exception_type 异常类型 (0-4: 电机异常/编码器异常/控制异常/系统异常)
+ */
+void query_motor_exceptions(uart_port_t uart_port, int exception_type);
+
+/**
+ * @brief 查询电机转子位置和转速
+ * @param uart_port UART端口
+ */
+void query_motor_position_speed(uart_port_t uart_port);
+
 #ifdef __cplusplus
 }
 #endif

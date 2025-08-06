@@ -249,12 +249,92 @@ static esp_err_t set_torque_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Debug页面处理器
+static esp_err_t debug_page_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, get_debug_page_html(), HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Debug功能处理器
+static esp_err_t debug_restart_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        restart_motor(g_motor_controller->driver_config.uart_port);
+        httpd_resp_send(req, "重启电机指令已发送", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_query_torque_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        query_motor_torque(g_motor_controller->driver_config.uart_port);
+        httpd_resp_send(req, "查询力矩指令已发送", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_query_power_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        query_motor_power(g_motor_controller->driver_config.uart_port);
+        httpd_resp_send(req, "查询功率指令已发送", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_query_encoder_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        query_encoder_count(g_motor_controller->driver_config.uart_port);
+        httpd_resp_send(req, "查询编码器指令已发送", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_query_pos_speed_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        query_motor_position_speed(g_motor_controller->driver_config.uart_port);
+        httpd_resp_send(req, "查询位置转速指令已发送", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_query_exception_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        char query[200];
+        int exception_type = 0; // 默认值
+        
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+            char type_str[16];
+            if (httpd_query_key_value(query, "type", type_str, sizeof(type_str)) == ESP_OK) {
+                exception_type = atoi(type_str);
+            }
+        }
+        
+        query_motor_exceptions(g_motor_controller->driver_config.uart_port, exception_type);
+        char response[100];
+        snprintf(response, sizeof(response), "查询异常指令已发送(类型: %d)", exception_type);
+        httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
 httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
     g_motor_controller = motor_controller;  // 保存电机控制器句柄
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 16;  // 增加最大URI处理程序数量
+    config.max_uri_handlers = 20;  // 增加最大URI处理程序数量以支持调试功能
     
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -286,6 +366,28 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
         httpd_uri_t set_torque = { .uri = "/set_torque", .method = HTTP_GET, .handler = set_torque_handler };
         esp_err_t torque_reg_result = httpd_register_uri_handler(server, &set_torque);
         ESP_LOGI(TAG, "注册 /set_torque 处理程序: %s", (torque_reg_result == ESP_OK) ? "成功" : "失败");
+        
+        // 注册调试页面处理程序
+        httpd_uri_t debug_page = { .uri = "/debug", .method = HTTP_GET, .handler = debug_page_handler };
+        httpd_register_uri_handler(server, &debug_page);
+        
+        httpd_uri_t debug_restart = { .uri = "/debug/restart", .method = HTTP_GET, .handler = debug_restart_handler };
+        httpd_register_uri_handler(server, &debug_restart);
+        
+        httpd_uri_t debug_query_torque = { .uri = "/debug/query_torque", .method = HTTP_GET, .handler = debug_query_torque_handler };
+        httpd_register_uri_handler(server, &debug_query_torque);
+        
+        httpd_uri_t debug_query_power = { .uri = "/debug/query_power", .method = HTTP_GET, .handler = debug_query_power_handler };
+        httpd_register_uri_handler(server, &debug_query_power);
+        
+        httpd_uri_t debug_query_encoder = { .uri = "/debug/query_encoder", .method = HTTP_GET, .handler = debug_query_encoder_handler };
+        httpd_register_uri_handler(server, &debug_query_encoder);
+        
+        httpd_uri_t debug_query_pos_speed = { .uri = "/debug/query_pos_speed", .method = HTTP_GET, .handler = debug_query_pos_speed_handler };
+        httpd_register_uri_handler(server, &debug_query_pos_speed);
+        
+        httpd_uri_t debug_query_exception = { .uri = "/debug/query_exception", .method = HTTP_GET, .handler = debug_query_exception_handler };
+        httpd_register_uri_handler(server, &debug_query_exception);
         
         ESP_LOGI(TAG, "Web服务器启动成功，端口: %d", config.server_port);
         ESP_LOGI(TAG, "剩余堆内存: %lu bytes", esp_get_free_heap_size());

@@ -17,6 +17,12 @@
 #define TORQUE_MODE_ID      0x002B      // 设置力矩模式的 CAN ID
 #define TARGET_TORQUE_ID    0x002E      // 发送目标力矩的 CAN ID
 #define CLEAR_ERROR_ID      0x0038      // 清除错误和异常的 CAN ID
+#define RESTART_MOTOR_ID    0x0036      // 重启电机的 CAN ID
+#define QUERY_TORQUE_ID     0x003C      // 查询目标力矩和当前力矩的 CAN ID
+#define QUERY_POWER_ID      0x003D      // 查询电功率和机械功率的 CAN ID
+#define QUERY_ENCODER_ID    0x002A      // 查询编码器多圈计数和单圈计数的 CAN ID
+#define QUERY_EXCEPTION_ID  0x0023      // 查询电机异常的 CAN ID
+#define QUERY_POS_SPEED_ID  0x0029      // 查询电机转子位置和转速的 CAN ID
 
 // CAN 指令数据
 static const uint8_t ENABLE_DATA[]      = {0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 致能马达
@@ -25,6 +31,8 @@ static const uint8_t VEL_DIRECT_MODE_DATA[] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x0
 static const uint8_t POS_DATA[]         = {0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}; // 进入位置斜坡模式
 static const uint8_t TORQUE_DIRECT_MODE_DATA[] = {0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}; // 力矩直接模式数据
 static const uint8_t CLEAR_ERROR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 清除错误和异常数据
+static const uint8_t RESTART_MOTOR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 重启电机数据
+static const uint8_t QUERY_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 查询指令通用数据
 
 // 内部函数声明
 static void send_serial_can_frame(uart_port_t uart_port, const char* cmd_name, 
@@ -219,4 +227,32 @@ void disable_motor(uart_port_t uart_port) {
 
 void clear_motor_errors(uart_port_t uart_port) {
     send_serial_can_frame(uart_port, "清除错误和异常", CLEAR_ERROR_ID, CLEAR_ERROR_DATA, sizeof(CLEAR_ERROR_DATA));
+}
+
+void restart_motor(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "重启电机", RESTART_MOTOR_ID, RESTART_MOTOR_DATA, sizeof(RESTART_MOTOR_DATA));
+}
+
+void query_motor_torque(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "查询电机力矩", QUERY_TORQUE_ID, QUERY_DATA, sizeof(QUERY_DATA));
+}
+
+void query_motor_power(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "查询电机功率", QUERY_POWER_ID, QUERY_DATA, sizeof(QUERY_DATA));
+}
+
+void query_encoder_count(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "查询编码器计数", QUERY_ENCODER_ID, QUERY_DATA, sizeof(QUERY_DATA));
+}
+
+void query_motor_exceptions(uart_port_t uart_port, int exception_type) {
+    uint8_t exception_data[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    if (exception_type >= 0 && exception_type <= 4) {
+        exception_data[0] = exception_type;
+    }
+    send_serial_can_frame(uart_port, "查询电机异常", QUERY_EXCEPTION_ID, exception_data, sizeof(exception_data));
+}
+
+void query_motor_position_speed(uart_port_t uart_port) {
+    send_serial_can_frame(uart_port, "查询位置和转速", QUERY_POS_SPEED_ID, QUERY_DATA, sizeof(QUERY_DATA));
 }

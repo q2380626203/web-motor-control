@@ -7,6 +7,7 @@ extern "C" {
 
 // 获取HTML网页内容
 const char* get_web_page_html(void);
+const char* get_debug_page_html(void);
 
 #ifdef __cplusplus
 }
