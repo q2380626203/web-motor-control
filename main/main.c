@@ -6,6 +6,8 @@
 
 #include "motor_control.h"
 #include "wifi_http_server.h"
+#include "uart_monitor.h"
+#include "gcode_unified_control.h"
 
 // 函数声明
 float angle_to_position(float angle_degrees);
@@ -17,6 +19,9 @@ static const char *TAG = "MAIN";
 // 全局变量
 static motor_controller_t* motor_controller = NULL;
 static httpd_handle_t web_server = NULL;
+static uart_monitor_t* uart_monitor = NULL;
+gcode_controller_t* g_gcode_controller = NULL; // G代码控制器（供uart_monitor使用）
+static char gcode_response_buffer[512]; // G代码响应缓冲区
 
 // 角度映射参数
 #define GEAR_RATIO 19.2158f          // 外部减速比
@@ -97,8 +102,43 @@ void motor_init_task(void *pvParameters) {
         ESP_LOGE(TAG, "Web服务器启动失败");
     }
     
-    ESP_LOGI(TAG, "电机初始化完成，Web服务器已启动");
+    // 初始化G代码控制器
+    gcode_controller_config_t gcode_config = {
+        .motor_controller = motor_controller,
+        .response_buffer = gcode_response_buffer,
+        .response_buffer_size = sizeof(gcode_response_buffer)
+    };
+    
+    g_gcode_controller = gcode_controller_init(&gcode_config);
+    if (g_gcode_controller) {
+        ESP_LOGI(TAG, "G代码控制器初始化成功");
+    } else {
+        ESP_LOGE(TAG, "G代码控制器初始化失败");
+    }
+    
+    // 初始化并启动UART监听器（监听电机控制的UART1接收数据和G代码CAN帧）
+    uart_monitor_config_t uart_config = {
+        .uart_port = UART_NUM_1,        // 使用UART1（与电机控制相同）
+        .buf_size = 1024,               // 缓冲区大小
+        .tag = "UART监听",               // 日志标签
+        .init_uart = false              // 复用已初始化的UART1
+    };
+    
+    uart_monitor = uart_monitor_init(&uart_config);
+    if (uart_monitor) {
+        if (uart_monitor_start(uart_monitor)) {
+            ESP_LOGI(TAG, "UART数据监听器启动成功");
+        } else {
+            ESP_LOGE(TAG, "UART数据监听器启动失败");
+        }
+    } else {
+        ESP_LOGE(TAG, "UART数据监听器初始化失败");
+    }
+    
+    ESP_LOGI(TAG, "电机初始化完成，Web服务器已启动，G代码控制器已就绪");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
+    ESP_LOGI(TAG, "UART1监听: 电机响应 + G代码CAN帧 (GPIO12-RX, GPIO13-TX) @ 115200 baud");
+    ESP_LOGI(TAG, "支持G代码命令: G1 X{角度}(位置模式), G1 F{速度}(速度模式), G1 T{力矩}(力矩模式), M0/M1(失能/使能)");
     
     // 任务完成，删除自己
     vTaskDelete(NULL);
