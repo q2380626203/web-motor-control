@@ -7,6 +7,7 @@
 #include "motor_control.h"
 #include "wifi_http_server.h"
 #include "uart_monitor.h"
+#include "can_monitor.h"
 #include "gcode_unified_control.h"
 
 // 函数声明
@@ -20,7 +21,8 @@ static const char *TAG = "MAIN";
 static motor_controller_t* motor_controller = NULL;
 static httpd_handle_t web_server = NULL;
 static uart_monitor_t* uart_monitor = NULL;
-gcode_controller_t* g_gcode_controller = NULL; // G代码控制器（供uart_monitor使用）
+static can_monitor_t* can_monitor = NULL;
+gcode_controller_t* g_gcode_controller = NULL; // G代码控制器（供CAN监听使用）
 static char gcode_response_buffer[512]; // G代码响应缓冲区
 
 // 角度映射参数
@@ -116,7 +118,7 @@ void motor_init_task(void *pvParameters) {
         ESP_LOGE(TAG, "G代码控制器初始化失败");
     }
     
-    // 初始化并启动UART监听器（监听电机控制的UART1接收数据和G代码CAN帧）
+    // 初始化并启动UART监听器（专门监听电机控制的UART1接收数据）
     uart_monitor_config_t uart_config = {
         .uart_port = UART_NUM_1,        // 使用UART1（与电机控制相同）
         .buf_size = 1024,               // 缓冲区大小
@@ -135,9 +137,31 @@ void motor_init_task(void *pvParameters) {
         ESP_LOGE(TAG, "UART数据监听器初始化失败");
     }
     
+    // 初始化并启动CAN监听器（专门监听G代码CAN数据）
+    can_monitor_config_t can_config = {
+        .tx_gpio = GPIO_NUM_1,               // CAN TX引脚
+        .rx_gpio = GPIO_NUM_2,               // CAN RX引脚
+        .timing_config = TWAI_TIMING_CONFIG_500KBITS(), // 500K波特率
+        .filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL(), // 接收所有消息
+        .tag = "CAN监听",                    // 日志标签
+        .gcode_controller = g_gcode_controller // G代码控制器
+    };
+    
+    can_monitor = can_monitor_init(&can_config);
+    if (can_monitor) {
+        if (can_monitor_start(can_monitor)) {
+            ESP_LOGI(TAG, "CAN数据监听器启动成功");
+        } else {
+            ESP_LOGE(TAG, "CAN数据监听器启动失败");
+        }
+    } else {
+        ESP_LOGE(TAG, "CAN数据监听器初始化失败");
+    }
+    
     ESP_LOGI(TAG, "电机初始化完成，Web服务器已启动，G代码控制器已就绪");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
-    ESP_LOGI(TAG, "UART1监听: 电机响应 + G代码CAN帧 (GPIO12-RX, GPIO13-TX) @ 115200 baud");
+    ESP_LOGI(TAG, "UART1监听: 电机响应数据 (GPIO12-RX, GPIO13-TX) @ 115200 baud");
+    ESP_LOGI(TAG, "CAN监听: G代码数据 (GPIO1-TX, GPIO2-RX) @ 500K baud");
     ESP_LOGI(TAG, "支持G代码命令: G1 X{角度}(位置模式), G1 F{速度}(速度模式), G1 T{力矩}(力矩模式), M0/M1(失能/使能)");
     
     // 任务完成，删除自己

@@ -53,7 +53,8 @@ void gcode_controller_deinit(gcode_controller_t* controller)
  */
 bool gcode_is_gcode_can_frame(const uint8_t* data, size_t length)
 {
-    // 检查CAN ID: 00 01
+    // 检查CAN ID: 0x0100 (小端格式: 00 01)
+    // 数据格式: [ID_LOW, ID_HIGH, DATA...]
     return (length >= 2 && data[0] == 0x00 && data[1] == 0x01);
 }
 

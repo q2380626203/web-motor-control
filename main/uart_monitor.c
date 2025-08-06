@@ -1,5 +1,4 @@
 #include "uart_monitor.h"
-#include "gcode_unified_control.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -11,8 +10,6 @@ static const char *TAG = "UART_MONITOR";
 // UART监听任务句柄
 static TaskHandle_t uart_monitor_task_handle = NULL;
 
-// G代码控制器（全局变量，由main.c设置）
-extern gcode_controller_t* g_gcode_controller;
 
 /**
  * @brief UART数据接收和打印任务
@@ -37,54 +34,31 @@ static void uart_monitor_task(void *pvParameters) {
                                    monitor->config.buf_size - 1, 100 / portTICK_PERIOD_MS);
         
         if (length > 0) {
-            // 首先检查是否为G代码CAN帧
-            bool is_gcode_frame = gcode_is_gcode_can_frame(data, length);
+            // 专门处理电机响应数据
+            // 确保字符串以null结尾
+            data[length] = '\0';
             
-            if (is_gcode_frame && g_gcode_controller) {
-                // 处理G代码帧
-                ESP_LOGI(monitor->config.tag, "收到G代码CAN帧 [长度:%d]", length);
-                
-                // 打印十六进制格式供调试
-                char hex_str[length * 3 + 1];
+            // 打印接收到的数据
+            ESP_LOGI(monitor->config.tag, "接收到电机响应 [长度:%d]: %.*s", length, length, data);
+            
+            // 如果包含不可打印字符，同时打印十六进制格式
+            bool has_non_printable = false;
+            for (int i = 0; i < length; i++) {
+                if (data[i] < 32 && data[i] != '\r' && data[i] != '\n' && data[i] != '\t') {
+                    has_non_printable = true;
+                    break;
+                }
+            }
+            
+            if (has_non_printable) {
+                char hex_str[length * 3 + 1]; // 每字节需要3个字符（XX空格）
                 hex_str[0] = '\0';
                 for (int i = 0; i < length; i++) {
                     char hex_byte[4];
                     snprintf(hex_byte, sizeof(hex_byte), "%02X ", data[i]);
                     strcat(hex_str, hex_byte);
                 }
-                ESP_LOGI(monitor->config.tag, "G代码帧十六进制: %s", hex_str);
-                
-                // 处理G代码帧
-                gcode_result_t result = gcode_process_can_frame(g_gcode_controller, data, length);
-                const char* response = gcode_get_response(g_gcode_controller);
-                ESP_LOGI(monitor->config.tag, "G代码执行结果: %d - %s", result, response);
-            } else {
-                // 电机响应数据或其他数据的原有处理逻辑
-                // 确保字符串以null结尾
-                data[length] = '\0';
-                
-                // 打印接收到的数据
-                ESP_LOGI(monitor->config.tag, "接收到电机响应 [长度:%d]: %.*s", length, length, data);
-                
-                // 如果包含不可打印字符，同时打印十六进制格式
-                bool has_non_printable = false;
-                for (int i = 0; i < length; i++) {
-                    if (data[i] < 32 && data[i] != '\r' && data[i] != '\n' && data[i] != '\t') {
-                        has_non_printable = true;
-                        break;
-                    }
-                }
-                
-                if (has_non_printable) {
-                    char hex_str[length * 3 + 1]; // 每字节需要3个字符（XX空格）
-                    hex_str[0] = '\0';
-                    for (int i = 0; i < length; i++) {
-                        char hex_byte[4];
-                        snprintf(hex_byte, sizeof(hex_byte), "%02X ", data[i]);
-                        strcat(hex_str, hex_byte);
-                    }
-                    ESP_LOGI(monitor->config.tag, "十六进制格式: %s", hex_str);
-                }
+                ESP_LOGI(monitor->config.tag, "十六进制格式: %s", hex_str);
             }
         }
         
