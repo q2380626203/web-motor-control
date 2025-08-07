@@ -8,6 +8,9 @@
 - **CAN控制**: 支持标准G代码命令通过CAN总线控制
 - **三种模式**: 位置控制、速度控制、力矩控制
 - **实时监控**: UART和CAN数据监听
+- **调试功能**: Web界面电机重启、异常清除
+- **自动查询**: 可配置频率的电机状态自动查询系统
+- **实时状态**: 力矩、功率、位置、转速、编码器、异常状态实时显示
 
 ## 硬件连接
 
@@ -35,6 +38,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 1. 连接WiFi热点 "myssid" (密码: mypassword)
 2. 浏览器打开 http://192.168.4.1
 3. 设置角度/位置/速度/力矩参数
+4. 配置自动查询频率(1-100Hz)
+5. 实时查看电机状态和异常信息
 
 ### G代码控制 (CAN)
 - `G1 X90` - 位置控制，转到90度
@@ -59,10 +64,12 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ```
 main/
-├── main.c              # 系统入口
-├── motor_control.c/h   # 电机控制
-├── gcode_unified_control.c/h  # G代码解析
-├── can_monitor.c/h     # CAN监听
-├── wifi_http_server.c/h # Web服务器
-└── web_interface.c/h   # Web界面
+├── main.c                        # 系统入口
+├── motor_control.c/h             # 电机控制核心
+├── motor_status_scheduler.c/h    # 电机状态自动查询调度器
+├── gcode_unified_control.c/h     # G代码解析
+├── can_monitor.c/h               # CAN监听
+├── uart_monitor.c/h              # UART数据监听
+├── wifi_http_server.c/h          # Web服务器
+└── web_interface.c/h             # Web界面与调试
 ```

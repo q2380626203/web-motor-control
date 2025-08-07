@@ -59,10 +59,14 @@ static void parse_motor_can_data(const uint8_t *data, int length) {
             break;
             
         case QUERY_EXCEPTION_ID:   // 0x0023 异常查询响应
-            parse_error_data(&data[2], get_last_exception_query_type(), status);
-            ESP_LOGI(TAG, "异常数据 - 查询类型: %d, 电机错误: 0x%08X, 编码器错误: 0x%08X, 控制器错误: 0x%08X, 系统错误: 0x%08X", 
-                     get_last_exception_query_type(), status->motor_error, status->encoder_error, 
-                     status->controller_error, status->system_error);
+            {
+                int current_exception_type = get_last_exception_query_type();
+                ESP_LOGI(TAG, "收到异常响应 - 当前记录的查询类型: %d", current_exception_type);
+                parse_error_data(&data[2], current_exception_type, status);
+                ESP_LOGI(TAG, "异常数据 - 查询类型: %d, 电机错误: 0x%08X, 编码器错误: 0x%08X, 控制器错误: 0x%08X, 系统错误: 0x%08X", 
+                         current_exception_type, status->motor_error, status->encoder_error, 
+                         status->controller_error, status->system_error);
+            }
             break;
             
         default:
@@ -121,13 +125,18 @@ static void uart_monitor_task(void *pvParameters) {
                 }
                 ESP_LOGI(monitor->config.tag, "十六进制格式: %s", hex_str);
                 
-                // 尝试解析为CAN数据 (如果长度为20字节，包含发送+响应)
-                if (length == 20) {
-                    // 解析响应部分 (后10字节)
-                    parse_motor_can_data(&data[10], 10);
-                } else if (length >= 10) {
-                    // 如果只有响应数据
-                    parse_motor_can_data(data, length);
+                // 处理粘包：按10字节边界分割数据包
+                int offset = 0;
+                while (offset + 10 <= length) {
+                    // 检查是否是有效的CAN响应包（前2字节是ID）
+                    uint16_t can_id = (data[offset] << 8) | data[offset + 1];
+                    if (can_id >= 0x0023 && can_id <= 0x003D) {
+                        parse_motor_can_data(&data[offset], 10);
+                        offset += 10;
+                    } else {
+                        // 如果不是有效包，跳过1字节继续寻找
+                        offset++;
+                    }
                 }
             }
         }

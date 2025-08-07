@@ -1,5 +1,6 @@
 #include "wifi_http_server.h"
 #include "web_interface.h"
+#include "motor_status_scheduler.h"
 #include <string.h>
 #include "esp_mac.h"
 #include "esp_wifi.h"
@@ -29,6 +30,9 @@ static const char *TAG = "WiFi_HTTP";
 
 // 全局电机控制器指针
 static motor_controller_t* g_motor_controller = NULL;
+
+// 全局状态查询调度器指针
+static motor_status_scheduler_t* g_status_scheduler = NULL;
 
 // WiFi事件处理
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
@@ -346,12 +350,67 @@ static esp_err_t debug_query_exception_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t api_set_query_frequency_handler(httpd_req_t *req) {
+    char query[200];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char freq_str[32];
+        if (httpd_query_key_value(query, "freq", freq_str, sizeof(freq_str)) == ESP_OK) {
+            float frequency = atof(freq_str);
+            
+            if (g_status_scheduler) {
+                if (motor_status_scheduler_set_frequency(g_status_scheduler, frequency)) {
+                    char response[100];
+                    snprintf(response, sizeof(response), "查询频率已设置为: %.1f Hz", frequency);
+                    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+                } else {
+                    httpd_resp_send(req, "频率设置失败", HTTPD_RESP_USE_STRLEN);
+                }
+            } else {
+                httpd_resp_send(req, "状态调度器未初始化", HTTPD_RESP_USE_STRLEN);
+            }
+            return ESP_OK;
+        }
+    }
+    httpd_resp_send(req, "参数错误", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t api_start_query_handler(httpd_req_t *req) {
+    if (g_status_scheduler) {
+        if (motor_status_scheduler_start(g_status_scheduler)) {
+            float freq = motor_status_scheduler_get_frequency(g_status_scheduler);
+            char response[100];
+            snprintf(response, sizeof(response), "自动查询已启动，频率: %.1f Hz", freq);
+            httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+        } else {
+            httpd_resp_send(req, "启动自动查询失败", HTTPD_RESP_USE_STRLEN);
+        }
+    } else {
+        httpd_resp_send(req, "状态调度器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t api_stop_query_handler(httpd_req_t *req) {
+    if (g_status_scheduler) {
+        motor_status_scheduler_stop(g_status_scheduler);
+        httpd_resp_send(req, "自动查询已停止", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "状态调度器未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+void set_status_scheduler(motor_status_scheduler_t* scheduler) {
+    g_status_scheduler = scheduler;
+}
+
 httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
     g_motor_controller = motor_controller;  // 保存电机控制器句柄
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 20;  // 增加最大URI处理程序数量以支持调试功能
+    config.max_uri_handlers = 25;  // 增加最大URI处理程序数量以支持调试功能
     
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -411,6 +470,17 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
         
         httpd_uri_t debug_query_exception = { .uri = "/debug/query_exception", .method = HTTP_GET, .handler = debug_query_exception_handler };
         httpd_register_uri_handler(server, &debug_query_exception);
+        
+        // 注册状态查询控制API
+        httpd_uri_t api_set_frequency = { .uri = "/api/set_query_frequency", .method = HTTP_GET, .handler = api_set_query_frequency_handler };
+        httpd_register_uri_handler(server, &api_set_frequency);
+        
+        httpd_uri_t api_start_query = { .uri = "/api/start_query", .method = HTTP_GET, .handler = api_start_query_handler };
+        httpd_register_uri_handler(server, &api_start_query);
+        
+        httpd_uri_t api_stop_query = { .uri = "/api/stop_query", .method = HTTP_GET, .handler = api_stop_query_handler };
+        esp_err_t stop_query_reg_result = httpd_register_uri_handler(server, &api_stop_query);
+        ESP_LOGI(TAG, "注册 /api/stop_query 处理程序: %s", (stop_query_reg_result == ESP_OK) ? "成功" : "失败");
         
         ESP_LOGI(TAG, "Web服务器启动成功，端口: %d", config.server_port);
         ESP_LOGI(TAG, "剩余堆内存: %lu bytes", esp_get_free_heap_size());

@@ -9,6 +9,7 @@
 #include "uart_monitor.h"
 #include "can_monitor.h"
 #include "gcode_unified_control.h"
+#include "motor_status_scheduler.h"
 
 // 函数声明
 float angle_to_position(float angle_degrees);
@@ -22,6 +23,7 @@ static motor_controller_t* motor_controller = NULL;
 static httpd_handle_t web_server = NULL;
 static uart_monitor_t* uart_monitor = NULL;
 static can_monitor_t* can_monitor = NULL;
+static motor_status_scheduler_t* status_scheduler = NULL;
 gcode_controller_t* g_gcode_controller = NULL; // G代码控制器（供CAN监听使用）
 static char gcode_response_buffer[512]; // G代码响应缓冲区
 
@@ -102,6 +104,22 @@ void motor_init_task(void *pvParameters) {
     web_server = start_webserver(motor_controller);
     if (!web_server) {
         ESP_LOGE(TAG, "Web服务器启动失败");
+    }
+    
+    // 初始化状态查询调度器
+    scheduler_config_t scheduler_config = {
+        .frequency = 1.0f,               // 默认1Hz查询频率
+        .uart_port = UART_NUM_1,         // 使用与电机控制相同的UART端口
+        .enable_all_queries = false      // 默认不启动自动查询，等待用户手动启动
+    };
+    
+    status_scheduler = motor_status_scheduler_init(&scheduler_config);
+    if (status_scheduler) {
+        ESP_LOGI(TAG, "状态查询调度器初始化成功");
+        // 将调度器传递给Web服务器
+        set_status_scheduler(status_scheduler);
+    } else {
+        ESP_LOGE(TAG, "状态查询调度器初始化失败");
     }
     
     // 初始化G代码控制器

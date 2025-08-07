@@ -1,5 +1,6 @@
 #include "motor_control.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -255,6 +256,7 @@ void query_motor_exceptions(uart_port_t uart_port, int exception_type) {
         exception_data[0] = exception_type;
         // 记录查询的异常类型，用于后续解析
         g_last_exception_query_type = exception_type;
+        ESP_LOGI("MOTOR_CONTROL", "设置异常查询类型为: %d", exception_type);
     }
     send_serial_can_frame(uart_port, "查询电机异常", QUERY_EXCEPTION_ID, exception_data, sizeof(exception_data));
 }
@@ -383,7 +385,7 @@ void parse_torque_data(const uint8_t *data, motor_status_t *status) {
     status->target_torque = ieee754_bytes_to_float(&data[0]);
     status->current_torque = ieee754_bytes_to_float(&data[4]);
     status->data_valid = true;
-    status->last_update_time = 0; // TODO: 使用系统时间戳
+    status->last_update_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
 }
 
 void parse_power_data(const uint8_t *data, motor_status_t *status) {
@@ -392,7 +394,7 @@ void parse_power_data(const uint8_t *data, motor_status_t *status) {
     status->electrical_power = ieee754_bytes_to_float(&data[0]);
     status->mechanical_power = ieee754_bytes_to_float(&data[4]);
     status->data_valid = true;
-    status->last_update_time = 0; // TODO: 使用系统时间戳
+    status->last_update_time = (uint32_t)(esp_timer_get_time() / 1000); // 毫秒时间戳
 }
 
 void parse_encoder_data(const uint8_t *data, motor_status_t *status) {
@@ -401,7 +403,7 @@ void parse_encoder_data(const uint8_t *data, motor_status_t *status) {
     status->shadow_count = bytes_to_int32(&data[0]);
     status->count_in_cpr = bytes_to_int32(&data[4]);
     status->data_valid = true;
-    status->last_update_time = 0; // TODO: 使用系统时间戳
+    status->last_update_time = (uint32_t)(esp_timer_get_time() / 1000); // 毫秒时间戳
 }
 
 void parse_position_speed_data(const uint8_t *data, motor_status_t *status) {
@@ -410,7 +412,7 @@ void parse_position_speed_data(const uint8_t *data, motor_status_t *status) {
     status->position = ieee754_bytes_to_float(&data[0]);
     status->velocity = ieee754_bytes_to_float(&data[4]);
     status->data_valid = true;
-    status->last_update_time = 0; // TODO: 使用系统时间戳
+    status->last_update_time = (uint32_t)(esp_timer_get_time() / 1000); // 毫秒时间戳
     
 }
 
@@ -432,7 +434,7 @@ void parse_error_data(const uint8_t *data, uint8_t error_type, motor_status_t *s
     }
     
     status->data_valid = true;
-    status->last_update_time = 0; // TODO: 使用系统时间戳
+    status->last_update_time = (uint32_t)(esp_timer_get_time() / 1000); // 毫秒时间戳
 }
 
 const char* get_error_description(uint32_t error_code, uint8_t error_type) {

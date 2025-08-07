@@ -3,6 +3,7 @@
 
 #include "esp_http_server.h"
 #include "motor_control.h"
+#include "motor_status_scheduler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +26,12 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller);
  * @param server HTTP服务器句柄
  */
 void stop_webserver(httpd_handle_t server);
+
+/**
+ * @brief 设置状态查询调度器
+ * @param scheduler 调度器句柄
+ */
+void set_status_scheduler(motor_status_scheduler_t* scheduler);
 
 #ifdef __cplusplus
 }
