@@ -104,6 +104,13 @@ static esp_err_t web_page_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t motor_status_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, get_motor_status_json(), HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 static esp_err_t set_angle_handler(httpd_req_t *req) {
     char query[200];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
@@ -170,6 +177,16 @@ static esp_err_t disable_handler(httpd_req_t *req) {
 static esp_err_t clear_handler(httpd_req_t *req) {
     if (g_motor_controller) {
         motor_control_clear_errors(g_motor_controller);
+        httpd_resp_send(req, "成功", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "电机未初始化", HTTPD_RESP_USE_STRLEN);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t restart_handler(httpd_req_t *req) {
+    if (g_motor_controller) {
+        restart_motor(g_motor_controller->driver_config.uart_port);
         httpd_resp_send(req, "成功", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机未初始化", HTTPD_RESP_USE_STRLEN);
@@ -342,6 +359,9 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
         httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = web_page_handler };
         httpd_register_uri_handler(server, &root);
         
+        httpd_uri_t motor_status = { .uri = "/api/motor_status", .method = HTTP_GET, .handler = motor_status_handler };
+        httpd_register_uri_handler(server, &motor_status);
+        
         httpd_uri_t set_angle = { .uri = "/set_angle", .method = HTTP_GET, .handler = set_angle_handler };
         httpd_register_uri_handler(server, &set_angle);
         
@@ -356,6 +376,9 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
         
         httpd_uri_t clear = { .uri = "/clear", .method = HTTP_GET, .handler = clear_handler };
         httpd_register_uri_handler(server, &clear);
+        
+        httpd_uri_t restart = { .uri = "/restart", .method = HTTP_GET, .handler = restart_handler };
+        httpd_register_uri_handler(server, &restart);
         
         httpd_uri_t set_mode = { .uri = "/set_mode", .method = HTTP_GET, .handler = set_mode_handler };
         httpd_register_uri_handler(server, &set_mode);

@@ -1,12 +1,16 @@
 #include "motor_control.h"
+#include "esp_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 // ====================================================================================
 // --- 常量定义 ---
 // ====================================================================================
 
+// 记录最后查询的异常类型
+static int g_last_exception_query_type = -1;
 
 // CAN 指令 ID
 #define ENABLE_ID           0x0027
@@ -102,11 +106,11 @@ void motor_control_deinit(motor_controller_t* controller) {
 void motor_control_enable(motor_controller_t* controller, bool enable) {
     if (!controller) return;
 
-    if (enable && !controller->motor_enabled) {
+    if (enable) {
         enable_motor(controller->driver_config.uart_port);
         controller->motor_enabled = true;
         printf("[信息] 电机已使能\n");
-    } else if (!enable && controller->motor_enabled) {
+    } else {
         disable_motor(controller->driver_config.uart_port);
         controller->motor_enabled = false;
         printf("[信息] 电机已失能\n");
@@ -249,10 +253,207 @@ void query_motor_exceptions(uart_port_t uart_port, int exception_type) {
     uint8_t exception_data[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     if (exception_type >= 0 && exception_type <= 4) {
         exception_data[0] = exception_type;
+        // 记录查询的异常类型，用于后续解析
+        g_last_exception_query_type = exception_type;
     }
     send_serial_can_frame(uart_port, "查询电机异常", QUERY_EXCEPTION_ID, exception_data, sizeof(exception_data));
 }
 
 void query_motor_position_speed(uart_port_t uart_port) {
     send_serial_can_frame(uart_port, "查询位置和转速", QUERY_POS_SPEED_ID, QUERY_DATA, sizeof(QUERY_DATA));
+}
+
+int get_last_exception_query_type(void) {
+    return g_last_exception_query_type;
+}
+
+// ====================================================================================
+// --- 数据解析函数实现 ---
+// ====================================================================================
+
+// 全局电机状态变量
+static motor_status_t g_motor_status = {0};
+
+// 异常码描述表
+typedef struct {
+    uint32_t code;
+    const char* description;
+} error_desc_t;
+
+// 电机异常码表
+static const error_desc_t motor_errors[] = {
+    {0x00000001, "相间电阻超出正常范围"},
+    {0x00000002, "相间电感超出正常范围"}, 
+    {0x00000010, "FOC频率太高"},
+    {0x00000080, "SVM调制异常"},
+    {0x00000400, "相间电流饱和"},
+    {0x00001000, "电机电流过大"},
+    {0x00020000, "电机温度过高"},
+    {0x00040000, "驱动器温度过高"},
+    {0x00080000, "FOC处理不及时"},
+    {0x00100000, "相间电流采样失效"},
+    {0x00200000, "控制器异常"},
+    {0x00400000, "母线电压超限"},
+    {0x00800000, "刹车电阻驱动异常"},
+    {0x01000000, "系统级异常"},
+    {0x02000000, "相间电流采样不及时"},
+    {0x04000000, "电机位置未知"},
+    {0x08000000, "电机速度未知"},
+    {0x10000000, "力矩未知"},
+    {0x20000000, "力矩控制未知"},
+    {0x40000000, "电流采样值未知"},
+    {0, NULL}
+};
+
+// 编码器异常码表
+static const error_desc_t encoder_errors[] = {
+    {0x00000001, "编码器带宽过高"},
+    {0x00000002, "CPR和极对数不匹配"},
+    {0x00000004, "编码器无响应"},
+    {0x00000400, "第二编码器通信错误"},
+    {0, NULL}
+};
+
+// 控制器异常码表  
+static const error_desc_t controller_errors[] = {
+    {0x00000001, "速度过高"},
+    {0x00000002, "控制输入模式不正确"},
+    {0x00000004, "锁相环增益不稳"},
+    {0x00000020, "位置/速度不稳定"},
+    {0x00000080, "机械功率和电气功率不匹配(编码器校准不正确,或磁钢不稳)"},
+    {0, NULL}
+};
+
+// 系统异常码表
+static const error_desc_t system_errors[] = {
+    {0x00000002, "电源电压过低"},
+    {0x00000004, "电源电压过高"},
+    {0x00000008, "电源反向（充电）电流过高"},
+    {0x00000010, "电源正向（放电）电流过高"},
+    {0, NULL}
+};
+
+// 异常类型信息结构
+typedef struct {
+    const error_desc_t* error_table;
+    size_t field_offset;  // 在motor_status_t中的字段偏移量
+} error_type_info_t;
+
+// 统一的异常类型信息获取函数
+static const error_type_info_t* get_error_type_info(uint8_t error_type) {
+    static const error_type_info_t error_types[] = {
+        [0] = {motor_errors,      offsetof(motor_status_t, motor_error)},      // 电机异常
+        [1] = {encoder_errors,    offsetof(motor_status_t, encoder_error)},    // 编码器异常
+        [3] = {controller_errors, offsetof(motor_status_t, controller_error)}, // 控制器异常
+        [4] = {system_errors,     offsetof(motor_status_t, system_error)},     // 系统异常
+    };
+    
+    if (error_type < sizeof(error_types)/sizeof(error_types[0]) && 
+        error_types[error_type].error_table != NULL) {
+        return &error_types[error_type];
+    }
+    return NULL;
+}
+
+float ieee754_bytes_to_float(const uint8_t *bytes) {
+    union {
+        float f;
+        uint32_t u;
+    } converter;
+    
+    // 小端序转换
+    converter.u = (uint32_t)bytes[0] | 
+                  ((uint32_t)bytes[1] << 8) | 
+                  ((uint32_t)bytes[2] << 16) | 
+                  ((uint32_t)bytes[3] << 24);
+    
+    return converter.f;
+}
+
+int32_t bytes_to_int32(const uint8_t *bytes) {
+    return (int32_t)bytes[0] | 
+           ((int32_t)bytes[1] << 8) | 
+           ((int32_t)bytes[2] << 16) | 
+           ((int32_t)bytes[3] << 24);
+}
+
+void parse_torque_data(const uint8_t *data, motor_status_t *status) {
+    if (!data || !status) return;
+    
+    status->target_torque = ieee754_bytes_to_float(&data[0]);
+    status->current_torque = ieee754_bytes_to_float(&data[4]);
+    status->data_valid = true;
+    status->last_update_time = 0; // TODO: 使用系统时间戳
+}
+
+void parse_power_data(const uint8_t *data, motor_status_t *status) {
+    if (!data || !status) return;
+    
+    status->electrical_power = ieee754_bytes_to_float(&data[0]);
+    status->mechanical_power = ieee754_bytes_to_float(&data[4]);
+    status->data_valid = true;
+    status->last_update_time = 0; // TODO: 使用系统时间戳
+}
+
+void parse_encoder_data(const uint8_t *data, motor_status_t *status) {
+    if (!data || !status) return;
+    
+    status->shadow_count = bytes_to_int32(&data[0]);
+    status->count_in_cpr = bytes_to_int32(&data[4]);
+    status->data_valid = true;
+    status->last_update_time = 0; // TODO: 使用系统时间戳
+}
+
+void parse_position_speed_data(const uint8_t *data, motor_status_t *status) {
+    if (!data || !status) return;
+    
+    status->position = ieee754_bytes_to_float(&data[0]);
+    status->velocity = ieee754_bytes_to_float(&data[4]);
+    status->data_valid = true;
+    status->last_update_time = 0; // TODO: 使用系统时间戳
+    
+}
+
+void parse_error_data(const uint8_t *data, uint8_t error_type, motor_status_t *status) {
+    if (!data || !status) return;
+    
+    // 取前4字节作为异常码（小端序）
+    uint32_t error_code = (uint32_t)data[0] | 
+                          ((uint32_t)data[1] << 8) | 
+                          ((uint32_t)data[2] << 16) | 
+                          ((uint32_t)data[3] << 24);
+    
+    // 使用统一接口获取异常类型信息
+    const error_type_info_t *type_info = get_error_type_info(error_type);
+    if (type_info) {
+        // 通过偏移量计算字段地址并存储异常码（包括0x00000000的正常状态）
+        uint32_t *error_field = (uint32_t*)((char*)status + type_info->field_offset);
+        *error_field = error_code;  // 无论是异常还是正常都要更新字段
+    }
+    
+    status->data_valid = true;
+    status->last_update_time = 0; // TODO: 使用系统时间戳
+}
+
+const char* get_error_description(uint32_t error_code, uint8_t error_type) {
+    if (error_code == 0) {
+        return "正常";
+    }
+    
+    const error_type_info_t *type_info = get_error_type_info(error_type);
+    if (!type_info) {
+        return "未知异常类型";
+    }
+    
+    for (int i = 0; type_info->error_table[i].description != NULL; i++) {
+        if (type_info->error_table[i].code == error_code) {
+            return type_info->error_table[i].description;
+        }
+    }
+    
+    return "未知异常码";
+}
+
+motor_status_t* get_motor_status(void) {
+    return &g_motor_status;
 }

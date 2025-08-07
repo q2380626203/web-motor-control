@@ -1,4 +1,5 @@
 #include "uart_monitor.h"
+#include "motor_control.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -9,6 +10,66 @@ static const char *TAG = "UART_MONITOR";
 
 // UART监听任务句柄
 static TaskHandle_t uart_monitor_task_handle = NULL;
+
+// CAN ID定义 (与motor_control.c中保持一致)
+#define QUERY_TORQUE_ID     0x003C
+#define QUERY_POWER_ID      0x003D  
+#define QUERY_ENCODER_ID    0x002A
+#define QUERY_EXCEPTION_ID  0x0023
+#define QUERY_POS_SPEED_ID  0x0029
+
+// 数据解析辅助函数
+static void parse_motor_can_data(const uint8_t *data, int length) {
+    motor_status_t *status = get_motor_status();
+    if (!status || length < 10) {
+        ESP_LOGW(TAG, "数据长度不足，需要至少10字节，当前: %d", length);
+        return;
+    }
+    
+    // 提取CAN ID (大端序)
+    uint16_t can_id = (data[0] << 8) | data[1];
+    
+    ESP_LOGI(TAG, "解析电机CAN响应 - ID: 0x%04X, 数据: %02X %02X %02X %02X %02X %02X %02X %02X", 
+             can_id, data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+    
+    // 根据CAN ID调用对应的解析函数
+    switch (can_id) {
+        case QUERY_TORQUE_ID:      // 0x003C 力矩查询响应
+            parse_torque_data(&data[2], status);  // 跳过CAN ID，从第3字节开始
+            ESP_LOGI(TAG, "力矩数据 - 目标: %.3f Nm, 当前: %.3f Nm", 
+                     status->target_torque, status->current_torque);
+            break;
+            
+        case QUERY_POWER_ID:       // 0x003D 功率查询响应  
+            parse_power_data(&data[2], status);
+            ESP_LOGI(TAG, "功率数据 - 电功率: %.3f W, 机械功率: %.3f W", 
+                     status->electrical_power, status->mechanical_power);
+            break;
+            
+        case QUERY_ENCODER_ID:     // 0x002A 编码器查询响应
+            parse_encoder_data(&data[2], status);
+            ESP_LOGI(TAG, "编码器数据 - Shadow: %d, CPR内计数: %d", 
+                     status->shadow_count, status->count_in_cpr);
+            break;
+            
+        case QUERY_POS_SPEED_ID:   // 0x0029 位置速度查询响应
+            parse_position_speed_data(&data[2], status);
+            ESP_LOGI(TAG, "位置速度数据 - 位置: %.3f, 速度: %.3f", 
+                     status->position, status->velocity);
+            break;
+            
+        case QUERY_EXCEPTION_ID:   // 0x0023 异常查询响应
+            parse_error_data(&data[2], get_last_exception_query_type(), status);
+            ESP_LOGI(TAG, "异常数据 - 查询类型: %d, 电机错误: 0x%08X, 编码器错误: 0x%08X, 控制器错误: 0x%08X, 系统错误: 0x%08X", 
+                     get_last_exception_query_type(), status->motor_error, status->encoder_error, 
+                     status->controller_error, status->system_error);
+            break;
+            
+        default:
+            ESP_LOGW(TAG, "未知的CAN ID: 0x%04X", can_id);
+            break;
+    }
+}
 
 
 /**
@@ -59,6 +120,15 @@ static void uart_monitor_task(void *pvParameters) {
                     strcat(hex_str, hex_byte);
                 }
                 ESP_LOGI(monitor->config.tag, "十六进制格式: %s", hex_str);
+                
+                // 尝试解析为CAN数据 (如果长度为20字节，包含发送+响应)
+                if (length == 20) {
+                    // 解析响应部分 (后10字节)
+                    parse_motor_can_data(&data[10], 10);
+                } else if (length >= 10) {
+                    // 如果只有响应数据
+                    parse_motor_can_data(data, length);
+                }
             }
         }
         

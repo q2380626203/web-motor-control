@@ -23,10 +23,39 @@ typedef struct {
     int buf_size;                   // 缓冲区大小
 } motor_driver_config_t;
 
+// 电机实时状态结构
+typedef struct {
+    // 力矩反馈 (0x003C)
+    float target_torque;           // 目标力矩 (Nm)
+    float current_torque;          // 当前力矩 (Nm)
+    
+    // 功率反馈 (0x003D) 
+    float electrical_power;        // 电功率 (W)
+    float mechanical_power;        // 机械功率 (W)
+    
+    // 编码器反馈 (0x002A)
+    int32_t shadow_count;          // 多圈计数
+    int32_t count_in_cpr;          // 单圈计数
+    
+    // 位置转速反馈 (0x0029)
+    float position;                // 位置 (转)
+    float velocity;                // 转速 (转/s)
+    
+    // 异常状态 (0x0023)
+    uint32_t motor_error;          // 电机异常码
+    uint32_t encoder_error;        // 编码器异常码
+    uint32_t controller_error;     // 控制器异常码
+    uint32_t system_error;         // 系统异常码
+    
+    bool data_valid;               // 数据有效性标志
+    uint32_t last_update_time;     // 最后更新时间戳
+} motor_status_t;
+
 // 电机控制器主结构
 typedef struct {
     motor_driver_config_t driver_config;   // 驱动配置
     bool motor_enabled;                    // 电机使能状态
+    motor_status_t status;                 // 电机实时状态
 } motor_controller_t;
 
 // ====================================================================================
@@ -201,10 +230,84 @@ void query_encoder_count(uart_port_t uart_port);
 void query_motor_exceptions(uart_port_t uart_port, int exception_type);
 
 /**
+ * @brief 获取最后查询的异常类型
+ * @return 异常类型 (0:电机, 1:编码器, 3:控制器, 4:系统, -1:未查询)
+ */
+int get_last_exception_query_type(void);
+
+/**
  * @brief 查询电机转子位置和转速
  * @param uart_port UART端口
  */
 void query_motor_position_speed(uart_port_t uart_port);
+
+// ====================================================================================
+// --- 数据解析函数 ---
+// ====================================================================================
+
+/**
+ * @brief 将4字节小端序数据转换为IEEE754浮点数
+ * @param bytes 4字节数据指针
+ * @return float32值
+ */
+float ieee754_bytes_to_float(const uint8_t *bytes);
+
+/**
+ * @brief 将4字节小端序数据转换为int32
+ * @param bytes 4字节数据指针
+ * @return int32值
+ */
+int32_t bytes_to_int32(const uint8_t *bytes);
+
+/**
+ * @brief 解析力矩反馈数据
+ * @param data 8字节CAN数据
+ * @param status 电机状态结构体指针
+ */
+void parse_torque_data(const uint8_t *data, motor_status_t *status);
+
+/**
+ * @brief 解析功率反馈数据
+ * @param data 8字节CAN数据
+ * @param status 电机状态结构体指针
+ */
+void parse_power_data(const uint8_t *data, motor_status_t *status);
+
+/**
+ * @brief 解析编码器反馈数据
+ * @param data 8字节CAN数据
+ * @param status 电机状态结构体指针
+ */
+void parse_encoder_data(const uint8_t *data, motor_status_t *status);
+
+/**
+ * @brief 解析位置转速反馈数据
+ * @param data 8字节CAN数据
+ * @param status 电机状态结构体指针
+ */
+void parse_position_speed_data(const uint8_t *data, motor_status_t *status);
+
+/**
+ * @brief 解析异常反馈数据
+ * @param data 8字节CAN数据
+ * @param error_type 异常类型 (0:电机 1:编码器 3:控制器 4:系统)
+ * @param status 电机状态结构体指针
+ */
+void parse_error_data(const uint8_t *data, uint8_t error_type, motor_status_t *status);
+
+/**
+ * @brief 根据异常码获取异常描述
+ * @param error_code 异常码
+ * @param error_type 异常类型
+ * @return 异常描述字符串
+ */
+const char* get_error_description(uint32_t error_code, uint8_t error_type);
+
+/**
+ * @brief 获取全局电机状态
+ * @return 电机状态结构体指针
+ */
+motor_status_t* get_motor_status(void);
 
 #ifdef __cplusplus
 }

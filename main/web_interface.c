@@ -1,4 +1,8 @@
 #include "web_interface.h"
+#include "motor_control.h"
+#include "esp_log.h"
+#include <stdio.h>
+#include <string.h>
 
 // 网页界面HTML内容
 static const char* web_page_html = 
@@ -31,11 +35,17 @@ static const char* web_page_html =
 ".btn-warning:hover{background:#f57c00}"
 ".btn-info{background:#2196F3}"
 ".btn-info:hover{background:#1976D2}"
+".btn-restart{background:#ff9800}"
+".btn-restart:hover{background:#f57c00}"
 ".control-panel{display:flex;justify-content:center;gap:10px;margin:20px 0;flex-wrap:wrap}"
 ".status{margin-top:20px;padding:15px;border-radius:8px;background:#e3f2fd;border-left:4px solid #2196F3}"
 ".mode-content{display:none}"
 ".mode-content.active{display:block}"
 ".unit{color:#888;font-size:12px;margin-left:5px}"
+".error-status{padding:2px 6px;border-radius:4px;font-size:12px;font-weight:bold}"
+".error-normal{background:#d4edda;color:#155724}"
+".error-warning{background:#fff3cd;color:#856404}"
+".error-danger{background:#f8d7da;color:#721c24}"
 "</style>"
 "</head><body>"
 "<div class='container'>"
@@ -102,10 +112,48 @@ static const char* web_page_html =
 "<button class='btn btn-info' onclick='enableMotor()'>🔋 使能电机</button>"
 "<button class='btn btn-danger' onclick='disableMotor()'>🔌 失能电机</button>"
 "<button class='btn btn-warning' onclick='clearErrors()'>🔧 清除错误</button>"
+"<button class='btn btn-restart' onclick='restartMotor()'>🔄 重启电机</button>"
 "</div>"
 
 "<div class='status'>"
 "<strong>当前状态:</strong> <span id='status'>系统就绪，请选择工作模式</span>"
+"</div>"
+
+"<div class='mode-section'>"
+"<div class='mode-title'>📊 电机实时状态</div>"
+"<div id='motor-status'>"
+"<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px'>"
+"<div style='padding:10px;background:#f0f8ff;border-radius:8px'>"
+"<strong>🔥 力矩反馈</strong><br>"
+"目标力矩: <span id='target-torque'>--</span> Nm<br>"
+"当前力矩: <span id='current-torque'>--</span> Nm"
+"</div>"
+"<div style='padding:10px;background:#f0fff0;border-radius:8px'>"
+"<strong>⚡ 功率反馈</strong><br>"
+"电功率: <span id='electrical-power'>--</span> W<br>"
+"机械功率: <span id='mechanical-power'>--</span> W"
+"</div>"
+"</div>"
+"<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px'>"
+"<div style='padding:10px;background:#fffaf0;border-radius:8px'>"
+"<strong>📍 位置转速</strong><br>"
+"位置: <span id='position-display'>--</span> 转<br>"
+"转速: <span id='velocity-display'>--</span> 转/s"
+"</div>"
+"<div style='padding:10px;background:#fff0f5;border-radius:8px'>"
+"<strong>🔢 编码器</strong><br>"
+"多圈计数: <span id='shadow-count'>--</span><br>"
+"单圈计数: <span id='count-in-cpr'>--</span>"
+"</div>"
+"</div>"
+"<div style='padding:10px;background:#f5f5f5;border-radius:8px'>"
+"<strong>❗ 异常状态</strong><br>"
+"电机: <span id='motor-error' class='error-status'>正常</span> | "
+"编码器: <span id='encoder-error' class='error-status'>正常</span> | "
+"控制器: <span id='controller-error' class='error-status'>正常</span> | "
+"系统: <span id='system-error' class='error-status'>正常</span>"
+"</div>"
+"</div>"
 "</div>"
 "</div>"
 
@@ -169,6 +217,38 @@ static const char* web_page_html =
 "document.getElementById('status').textContent='错误已清除 | '+d;"
 "}).catch(e=>alert('操作失败: '+e));"
 "}"
+"function restartMotor(){"
+"fetch('/restart').then(r=>r.text()).then(d=>{"
+"document.getElementById('status').textContent='电机已重启 | '+d;"
+"}).catch(e=>alert('操作失败: '+e));"
+"}"
+
+"function updateMotorStatus(){"
+"fetch('/api/motor_status').then(r=>r.json()).then(data=>{"
+"document.getElementById('target-torque').textContent=data.target_torque.toFixed(3)||'--';"
+"document.getElementById('current-torque').textContent=data.current_torque.toFixed(3)||'--';"
+"document.getElementById('electrical-power').textContent=data.electrical_power.toFixed(2)||'--';"
+"document.getElementById('mechanical-power').textContent=data.mechanical_power.toFixed(2)||'--';"
+"document.getElementById('position-display').textContent=data.position.toFixed(2)||'--';"
+"document.getElementById('velocity-display').textContent=data.velocity.toFixed(3)||'--';"
+"document.getElementById('shadow-count').textContent=data.shadow_count||'--';"
+"document.getElementById('count-in-cpr').textContent=data.count_in_cpr||'--';"
+
+"updateErrorStatus('motor-error',data.motor_error,data.motor_error_desc);"
+"updateErrorStatus('encoder-error',data.encoder_error,data.encoder_error_desc);"
+"updateErrorStatus('controller-error',data.controller_error,data.controller_error_desc);"
+"updateErrorStatus('system-error',data.system_error,data.system_error_desc);"
+"}).catch(e=>console.log('状态更新失败:',e));"
+"}"
+
+"function updateErrorStatus(id,code,desc){"
+"let elem=document.getElementById(id);"
+"elem.className='error-status '+(code?'error-danger':'error-normal');"
+"elem.textContent=desc||'正常';"
+"}"
+
+"setInterval(updateMotorStatus,1000);"
+"updateMotorStatus();"
 "</script>"
 "</body></html>";
 
@@ -227,9 +307,8 @@ static const char* debug_page_html =
 "<select id='exceptionType'>"
 "<option value='0'>电机异常</option>"
 "<option value='1'>编码器异常</option>"
-"<option value='2'>控制异常</option>"
-"<option value='3'>系统异常</option>"
-"<option value='4'>全部异常</option>"
+"<option value='3'>控制器异常</option>"
+"<option value='4'>系统异常</option>"
 "</select>"
 "<button class='btn btn-query' onclick='queryException()'>❌ 查询异常</button>"
 "</div>"
@@ -288,4 +367,64 @@ const char* get_web_page_html(void) {
 
 const char* get_debug_page_html(void) {
     return debug_page_html;
+}
+
+// 全局JSON缓冲区
+static char motor_status_json_buffer[1024];
+
+const char* get_motor_status_json(void) {
+    motor_status_t *status = get_motor_status();
+    if (!status) {
+        strcpy(motor_status_json_buffer, "{\"error\":\"状态获取失败\"}");
+        return motor_status_json_buffer;
+    }
+    
+    // 获取异常描述
+    const char *motor_error_desc = get_error_description(status->motor_error, 0);
+    const char *encoder_error_desc = get_error_description(status->encoder_error, 1);
+    const char *controller_error_desc = get_error_description(status->controller_error, 3);
+    const char *system_error_desc = get_error_description(status->system_error, 4);
+    
+    snprintf(motor_status_json_buffer, sizeof(motor_status_json_buffer),
+        "{"
+        "\"target_torque\":%.3f,"
+        "\"current_torque\":%.3f,"
+        "\"electrical_power\":%.2f,"
+        "\"mechanical_power\":%.2f,"
+        "\"position\":%.2f,"
+        "\"velocity\":%.3f,"
+        "\"shadow_count\":%ld,"
+        "\"count_in_cpr\":%ld,"
+        "\"motor_error\":%lu,"
+        "\"encoder_error\":%lu,"
+        "\"controller_error\":%lu,"
+        "\"system_error\":%lu,"
+        "\"motor_error_desc\":\"%s\","
+        "\"encoder_error_desc\":\"%s\","
+        "\"controller_error_desc\":\"%s\","
+        "\"system_error_desc\":\"%s\","
+        "\"data_valid\":%s,"
+        "\"last_update_time\":%lu"
+        "}",
+        status->target_torque,
+        status->current_torque,
+        status->electrical_power,
+        status->mechanical_power,
+        status->position,
+        status->velocity,
+        (long)status->shadow_count,
+        (long)status->count_in_cpr,
+        (unsigned long)status->motor_error,
+        (unsigned long)status->encoder_error,
+        (unsigned long)status->controller_error,
+        (unsigned long)status->system_error,
+        motor_error_desc,
+        encoder_error_desc,
+        controller_error_desc,
+        system_error_desc,
+        status->data_valid ? "true" : "false",
+        (unsigned long)status->last_update_time
+    );
+    
+    return motor_status_json_buffer;
 }
