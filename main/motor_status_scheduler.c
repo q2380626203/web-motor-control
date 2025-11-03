@@ -19,37 +19,37 @@ static void query_task(void *pvParameters);
 static void query_task(void *pvParameters) {
     motor_status_scheduler_t* scheduler = (motor_status_scheduler_t*)pvParameters;
     query_event_t event;
-    
+
     ESP_LOGI(TAG, "查询任务启动成功");
-    
+
     while (true) {
         // 等待定时器发送的查询事件
         if (xQueueReceive(scheduler->query_queue, &event, portMAX_DELAY) == pdTRUE) {
             if (!scheduler->auto_query_enabled) {
                 continue; // 如果自动查询被禁用，跳过处理
             }
-            
+
             // 根据事件类型执行相应的查询操作
             switch (event.type) {
                 case QUERY_EVENT_TORQUE:
-                    query_motor_torque(event.uart_port);
-                    ESP_LOGI(TAG, "自动查询力矩");
+                    query_motor_torque(event.uart_port, event.motor_id);
+                    ESP_LOGI(TAG, "自动查询力矩 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_POWER:
-                    query_motor_power(event.uart_port);
-                    ESP_LOGI(TAG, "自动查询功率");
+                    query_motor_power(event.uart_port, event.motor_id);
+                    ESP_LOGI(TAG, "自动查询功率 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_ENCODER:
-                    query_encoder_count(event.uart_port);
-                    ESP_LOGI(TAG, "自动查询编码器");
+                    query_encoder_count(event.uart_port, event.motor_id);
+                    ESP_LOGI(TAG, "自动查询编码器 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_POSITION_SPEED:
-                    query_motor_position_speed(event.uart_port);
-                    ESP_LOGI(TAG, "自动查询位置速度");
+                    query_motor_position_speed(event.uart_port, event.motor_id);
+                    ESP_LOGI(TAG, "自动查询位置速度 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_EXCEPTIONS:
-                    query_motor_exceptions(event.uart_port, event.exception_type);
-                    ESP_LOGI(TAG, "自动查询异常状态(类型:%d)", event.exception_type);
+                    query_motor_exceptions(event.uart_port, event.motor_id, event.exception_type);
+                    ESP_LOGI(TAG, "自动查询异常状态 [电机%d] (类型:%d)", event.motor_id, event.exception_type);
                     break;
                 default:
                     ESP_LOGW(TAG, "未知查询事件类型: %d", event.type);
@@ -79,6 +79,7 @@ motor_status_scheduler_t* motor_status_scheduler_init(const scheduler_config_t* 
     scheduler->query_frequency = config->frequency;
     scheduler->auto_query_enabled = config->enable_all_queries;
     scheduler->uart_port = config->uart_port;
+    scheduler->motor_id = config->motor_id;
     scheduler->current_query_index = 0;
     scheduler->current_exception_type = 0;
     scheduler->is_running = false;
@@ -131,30 +132,31 @@ motor_status_scheduler_t* motor_status_scheduler_init(const scheduler_config_t* 
 // 轻量级定时器回调 - 只发送事件到队列
 static void query_timer_callback(TimerHandle_t xTimer) {
     motor_status_scheduler_t* scheduler = (motor_status_scheduler_t*)pvTimerGetTimerID(xTimer);
-    
+
     if (!scheduler || !scheduler->query_queue) {
         return;
     }
-    
+
     // 创建查询事件
     query_event_t event;
     event.uart_port = scheduler->uart_port;
+    event.motor_id = scheduler->motor_id;
     event.type = (query_event_type_t)scheduler->current_query_index;
     event.exception_type = 0; // 默认值
-    
+
     // 如果是异常查询，设置异常类型并更新计数器
     if (event.type == QUERY_EVENT_EXCEPTIONS) {
         event.exception_type = scheduler->current_exception_type;
         scheduler->current_exception_type = (scheduler->current_exception_type + 1) % 5; // 0-4循环
     }
-    
+
     // 发送事件到队列（非阻塞）
     BaseType_t ret = xQueueSendFromISR(scheduler->query_queue, &event, NULL);
     if (ret != pdPASS) {
         // 队列满了，跳过这次查询（避免阻塞）
         return;
     }
-    
+
     // 更新查询索引
     scheduler->current_query_index = (scheduler->current_query_index + 1) % QUERY_TYPES_COUNT;
 }

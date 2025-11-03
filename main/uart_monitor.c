@@ -11,12 +11,43 @@ static const char *TAG = "UART_MONITOR";
 // UART监听任务句柄
 static TaskHandle_t uart_monitor_task_handle = NULL;
 
-// CAN ID定义 (与motor_control.c中保持一致)
-#define QUERY_TORQUE_ID     0x003C
-#define QUERY_POWER_ID      0x003D  
-#define QUERY_ENCODER_ID    0x002A
-#define QUERY_EXCEPTION_ID  0x0023
-#define QUERY_POS_SPEED_ID  0x0029
+// CAN 基础ID定义 (电机ID 1的响应ID)
+#define BASE_QUERY_TORQUE_ID     0x003C
+#define BASE_QUERY_POWER_ID      0x003D
+#define BASE_QUERY_ENCODER_ID    0x002A
+#define BASE_QUERY_EXCEPTION_ID  0x0023
+#define BASE_QUERY_POS_SPEED_ID  0x0029
+
+// 电机ID偏移量
+#define MOTOR_ID_OFFSET 0x20
+
+/**
+ * @brief 根据响应CAN ID判断是哪个电机和什么类型的响应
+ * @param can_id 接收到的CAN ID
+ * @param motor_id 输出电机ID (1-4)
+ * @param base_id 输出基础ID（去除电机ID偏移后的ID）
+ * @return true表示是有效的电机响应ID
+ */
+static bool decode_motor_response_id(uint16_t can_id, uint8_t *motor_id, uint16_t *base_id) {
+    // 检查ID范围 (0x0023-0x003D对应电机1, 0x0043-0x005D对应电机2, 以此类推)
+    if (can_id < BASE_QUERY_EXCEPTION_ID) {
+        return false; // ID太小
+    }
+
+    // 计算可能的电机ID (1-4)
+    for (uint8_t id = 1; id <= 4; id++) {
+        uint16_t offset = (id - 1) * MOTOR_ID_OFFSET;
+        // 检查是否在该电机的响应ID范围内
+        if (can_id >= (BASE_QUERY_EXCEPTION_ID + offset) &&
+            can_id <= (BASE_QUERY_POWER_ID + offset)) {
+            *motor_id = id;
+            *base_id = can_id - offset;
+            return true;
+        }
+    }
+
+    return false; // 不是有效的电机响应ID
+}
 
 // 数据解析辅助函数
 static void parse_motor_can_data(const uint8_t *data, int length) {
@@ -25,52 +56,60 @@ static void parse_motor_can_data(const uint8_t *data, int length) {
         ESP_LOGW(TAG, "数据长度不足，需要至少10字节，当前: %d", length);
         return;
     }
-    
+
     // 提取CAN ID (大端序)
     uint16_t can_id = (data[0] << 8) | data[1];
-    
-    ESP_LOGI(TAG, "解析电机CAN响应 - ID: 0x%04X, 数据: %02X %02X %02X %02X %02X %02X %02X %02X", 
-             can_id, data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
-    
-    // 根据CAN ID调用对应的解析函数
-    switch (can_id) {
-        case QUERY_TORQUE_ID:      // 0x003C 力矩查询响应
+
+    // 解码电机ID和基础ID
+    uint8_t motor_id;
+    uint16_t base_id;
+    if (!decode_motor_response_id(can_id, &motor_id, &base_id)) {
+        ESP_LOGW(TAG, "无效的CAN响应ID: 0x%04X", can_id);
+        return;
+    }
+
+    ESP_LOGI(TAG, "解析电机CAN响应 - 电机ID:%d, CAN ID:0x%04X, 数据: %02X %02X %02X %02X %02X %02X %02X %02X",
+             motor_id, can_id, data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+
+    // 根据基础ID调用对应的解析函数
+    switch (base_id) {
+        case BASE_QUERY_TORQUE_ID:      // 0x003C 力矩查询响应
             parse_torque_data(&data[2], status);  // 跳过CAN ID，从第3字节开始
-            ESP_LOGI(TAG, "力矩数据 - 目标: %.3f Nm, 当前: %.3f Nm", 
-                     status->target_torque, status->current_torque);
+            ESP_LOGI(TAG, "[电机%d] 力矩数据 - 目标: %.3f Nm, 当前: %.3f Nm",
+                     motor_id, status->target_torque, status->current_torque);
             break;
-            
-        case QUERY_POWER_ID:       // 0x003D 功率查询响应  
+
+        case BASE_QUERY_POWER_ID:       // 0x003D 功率查询响应
             parse_power_data(&data[2], status);
-            ESP_LOGI(TAG, "功率数据 - 电功率: %.3f W, 机械功率: %.3f W", 
-                     status->electrical_power, status->mechanical_power);
+            ESP_LOGI(TAG, "[电机%d] 功率数据 - 电功率: %.3f W, 机械功率: %.3f W",
+                     motor_id, status->electrical_power, status->mechanical_power);
             break;
-            
-        case QUERY_ENCODER_ID:     // 0x002A 编码器查询响应
+
+        case BASE_QUERY_ENCODER_ID:     // 0x002A 编码器查询响应
             parse_encoder_data(&data[2], status);
-            ESP_LOGI(TAG, "编码器数据 - Shadow: %d, CPR内计数: %d", 
-                     status->shadow_count, status->count_in_cpr);
+            ESP_LOGI(TAG, "[电机%d] 编码器数据 - Shadow: %d, CPR内计数: %d",
+                     motor_id, status->shadow_count, status->count_in_cpr);
             break;
-            
-        case QUERY_POS_SPEED_ID:   // 0x0029 位置速度查询响应
+
+        case BASE_QUERY_POS_SPEED_ID:   // 0x0029 位置速度查询响应
             parse_position_speed_data(&data[2], status);
-            ESP_LOGI(TAG, "位置速度数据 - 位置: %.3f, 速度: %.3f", 
-                     status->position, status->velocity);
+            ESP_LOGI(TAG, "[电机%d] 位置速度数据 - 位置: %.3f, 速度: %.3f",
+                     motor_id, status->position, status->velocity);
             break;
-            
-        case QUERY_EXCEPTION_ID:   // 0x0023 异常查询响应
+
+        case BASE_QUERY_EXCEPTION_ID:   // 0x0023 异常查询响应
             {
                 int current_exception_type = get_last_exception_query_type();
-                ESP_LOGI(TAG, "收到异常响应 - 当前记录的查询类型: %d", current_exception_type);
+                ESP_LOGI(TAG, "[电机%d] 收到异常响应 - 当前记录的查询类型: %d", motor_id, current_exception_type);
                 parse_error_data(&data[2], current_exception_type, status);
-                ESP_LOGI(TAG, "异常数据 - 查询类型: %d, 电机错误: 0x%08X, 编码器错误: 0x%08X, 控制器错误: 0x%08X, 系统错误: 0x%08X", 
-                         current_exception_type, status->motor_error, status->encoder_error, 
+                ESP_LOGI(TAG, "[电机%d] 异常数据 - 查询类型: %d, 电机错误: 0x%08X, 编码器错误: 0x%08X, 控制器错误: 0x%08X, 系统错误: 0x%08X",
+                         motor_id, current_exception_type, status->motor_error, status->encoder_error,
                          status->controller_error, status->system_error);
             }
             break;
-            
+
         default:
-            ESP_LOGW(TAG, "未知的CAN ID: 0x%04X", can_id);
+            ESP_LOGW(TAG, "[电机%d] 未知的基础CAN ID: 0x%04X", motor_id, base_id);
             break;
     }
 }
@@ -130,7 +169,10 @@ static void uart_monitor_task(void *pvParameters) {
                 while (offset + 10 <= length) {
                     // 检查是否是有效的CAN响应包（前2字节是ID）
                     uint16_t can_id = (data[offset] << 8) | data[offset + 1];
-                    if (can_id >= 0x0023 && can_id <= 0x003D) {
+                    uint8_t motor_id;
+                    uint16_t base_id;
+                    if (decode_motor_response_id(can_id, &motor_id, &base_id)) {
+                        // 有效的电机响应包
                         parse_motor_can_data(&data[offset], 10);
                         offset += 10;
                     } else {
