@@ -142,12 +142,54 @@ static esp_err_t set_position_handler(httpd_req_t *req) {
         char pos_str[32];
         if (httpd_query_key_value(query, "value", pos_str, sizeof(pos_str)) == ESP_OK) {
             float position = atof(pos_str);
-            
+
             if (g_motor_controller) {
                 motor_control_set_position(g_motor_controller, position);
                 float angle = position;
                 char response[100];
                 snprintf(response, sizeof(response), "角度: %.3f°", angle);
+                httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+        }
+    }
+    httpd_resp_send(req, "设置失败", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t set_pos_vel_limit_handler(httpd_req_t *req) {
+    char query[200];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char vel_str[32];
+        if (httpd_query_key_value(query, "value", vel_str, sizeof(vel_str)) == ESP_OK) {
+            float velocity_limit = atof(vel_str);
+
+            if (g_motor_controller) {
+                set_position_velocity_limit(g_motor_controller->driver_config.motor_id, velocity_limit);
+                char response[100];
+                snprintf(response, sizeof(response), "速度限制已设置: %.2f r/s", velocity_limit);
+                httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+                return ESP_OK;
+            }
+        }
+    }
+    httpd_resp_send(req, "设置失败", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t set_pos_acc_limits_handler(httpd_req_t *req) {
+    char query[200];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char accel_str[32], decel_str[32];
+        if (httpd_query_key_value(query, "accel", accel_str, sizeof(accel_str)) == ESP_OK &&
+            httpd_query_key_value(query, "decel", decel_str, sizeof(decel_str)) == ESP_OK) {
+            float accel_limit = atof(accel_str);
+            float decel_limit = atof(decel_str);
+
+            if (g_motor_controller) {
+                set_position_acceleration_limits(g_motor_controller->driver_config.motor_id, accel_limit, decel_limit);
+                char response[100];
+                snprintf(response, sizeof(response), "加速度限制已设置: %.2f / %.2f r/s²", accel_limit, decel_limit);
                 httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
                 return ESP_OK;
             }
@@ -426,7 +468,13 @@ httpd_handle_t start_webserver(motor_controller_t* motor_controller) {
         
         httpd_uri_t set_position = { .uri = "/set_position", .method = HTTP_GET, .handler = set_position_handler };
         httpd_register_uri_handler(server, &set_position);
-        
+
+        httpd_uri_t set_pos_vel_limit = { .uri = "/set_pos_vel_limit", .method = HTTP_GET, .handler = set_pos_vel_limit_handler };
+        httpd_register_uri_handler(server, &set_pos_vel_limit);
+
+        httpd_uri_t set_pos_acc_limits = { .uri = "/set_pos_acc_limits", .method = HTTP_GET, .handler = set_pos_acc_limits_handler };
+        httpd_register_uri_handler(server, &set_pos_acc_limits);
+
         httpd_uri_t enable = { .uri = "/enable", .method = HTTP_GET, .handler = enable_handler };
         httpd_register_uri_handler(server, &enable);
         

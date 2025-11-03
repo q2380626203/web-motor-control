@@ -162,6 +162,21 @@ void set_motor_position_mode(uint8_t motor_id);
 void send_target_position(uint8_t motor_id, float position);
 
 /**
+ * @brief 设置位置模式速度限制
+ * @param motor_id 电机ID (1-4)
+ * @param velocity_limit 速度限制 (r/s)
+ */
+void set_position_velocity_limit(uint8_t motor_id, float velocity_limit);
+
+/**
+ * @brief 设置位置模式加速度和减速度限制
+ * @param motor_id 电机ID (1-4)
+ * @param acceleration_limit 加速度限制 (r/s²)
+ * @param deceleration_limit 减速度限制 (r/s²)
+ */
+void set_position_acceleration_limits(uint8_t motor_id, float acceleration_limit, float deceleration_limit);
+
+/**
  * @brief 发送目标速度
  * @param motor_id 电机ID (1-4)
  * @param velocity 目标速度 (r/s)

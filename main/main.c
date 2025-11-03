@@ -35,21 +35,24 @@ static char gcode_response_buffer[512]; // G代码响应缓冲区
 
 /**
  * @brief 角度转换为电机位置值
- * @param angle_degrees 输入角度(度) - 外部输出轴角度
+ * @param angle_degrees 输入角度(度) - 外部输出轴角度，支持范围 -360 到 360 度（含边界）
  * @return 电机位置值 - 内部电机需要的位置值
  */
 float angle_to_position(float angle_degrees) {
-    // 角度归一化到0-360度范围
-    while (angle_degrees < 0) angle_degrees += 360.0f;
-    while (angle_degrees >= 360.0f) angle_degrees -= 360.0f;
-    
-    // 外部角度转换为内部电机需要转的圈数
+    // 限制角度范围在 -360 到 360 度之间（包含边界值）
+    if (angle_degrees < -360.0f) {
+        angle_degrees = -360.0f;
+    } else if (angle_degrees > 360.0f) {
+        angle_degrees = 360.0f;
+    }
+
+    // 直接转换角度（支持负值，表示反向旋转）
     // 外部转angle_degrees度，内部需要转 angle_degrees * (减速比/360度)
     float internal_rotations = (angle_degrees / 360.0f) * GEAR_RATIO;
-    
+
     // 内部转换为位置值：每转1圈对应位置值8
     float motor_position = internal_rotations * ANGLE_TO_POSITION_SCALE;
-    
+
     return motor_position;
 }
 
@@ -78,8 +81,8 @@ float external_torque_to_internal(float external_torque) {
 void motor_init_task(void *pvParameters) {
     // ========== 初始化电机1控制器 ==========
     motor_driver_config_t motor1_config = {
-        .tx_pin = GPIO_NUM_13,   // CAN TX引脚（与CAN监听器使用相同引脚）
-        .rx_pin = GPIO_NUM_12,   // CAN RX引脚
+        .tx_pin = GPIO_NUM_11,   // CAN TX引脚（与CAN监听器使用相同引脚）
+        .rx_pin = GPIO_NUM_10,   // CAN RX引脚
         .motor_id = 1            // 电机ID 1
     };
 
@@ -93,8 +96,8 @@ void motor_init_task(void *pvParameters) {
 
     // ========== 初始化电机4控制器 ==========
     motor_driver_config_t motor4_config = {
-        .tx_pin = GPIO_NUM_13,   // CAN TX引脚（共享CAN总线）
-        .rx_pin = GPIO_NUM_12,   // CAN RX引脚
+        .tx_pin = GPIO_NUM_11,   // CAN TX引脚（共享CAN总线）
+        .rx_pin = GPIO_NUM_10,   // CAN RX引脚
         .motor_id = 4            // 电机ID 4
     };
 
@@ -156,8 +159,8 @@ void motor_init_task(void *pvParameters) {
     // 初始化并启动TWAI电机数据监听器（专门监听电机响应数据）
     // 该监听器复用motor_control已初始化的TWAI驱动，不会重复初始化
     uart_monitor_config_t uart_config = {
-        .tx_gpio = GPIO_NUM_13,         // CAN TX引脚（与motor_control相同）
-        .rx_gpio = GPIO_NUM_12,         // CAN RX引脚
+        .tx_gpio = GPIO_NUM_11,         // CAN TX引脚（与motor_control相同）
+        .rx_gpio = GPIO_NUM_10,         // CAN RX引脚
         .tag = "电机响应监听"             // 日志标签
     };
 
@@ -204,7 +207,7 @@ void motor_init_task(void *pvParameters) {
     ESP_LOGI(TAG, "当前控制电机ID: 1 和 4");
     ESP_LOGI(TAG, "电机1 CAN基础ID + 0x00, 电机4 CAN基础ID + 0x60");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
-    ESP_LOGI(TAG, "CAN总线配置: TX=GPIO12, RX=GPIO13, 500kbps标准帧");
+    ESP_LOGI(TAG, "CAN总线配置: TX=GPIO11, RX=GPIO10, 500kbps标准帧");
     ESP_LOGI(TAG, "电机控制通过TWAI直接发送CAN指令");
     ESP_LOGI(TAG, "Web界面支持: 位置/速度/力矩模式控制");
 

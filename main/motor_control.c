@@ -24,6 +24,8 @@ static int g_last_exception_query_type = -1;
 #define BASE_TARGET_VEL_ID       0x002D      // 发送目标速度的 CAN ID
 #define BASE_POS_MODE_ID         0x002B      // 设置位置模式的 CAN ID
 #define BASE_TARGET_POS_ID       0x002C      // 发送目标位置的 CAN ID
+#define BASE_POS_VEL_LIMIT_ID    0x0031      // 设置位置模式速度限制的 CAN ID
+#define BASE_POS_ACC_LIMIT_ID    0x0032      // 设置位置模式加速度/减速度限制的 CAN ID
 #define BASE_TORQUE_MODE_ID      0x002B      // 设置力矩模式的 CAN ID
 #define BASE_TARGET_TORQUE_ID    0x002E      // 发送目标力矩的 CAN ID
 #define BASE_CLEAR_ERROR_ID      0x0038      // 清除错误和异常的 CAN ID
@@ -55,7 +57,7 @@ static inline uint32_t get_can_id(uint32_t base_id, uint8_t motor_id) {
 static const uint8_t ENABLE_DATA[]      = {0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 致能马达
 static const uint8_t DISABLE_DATA[]     = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 失能马达
 static const uint8_t VEL_DIRECT_MODE_DATA[] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}; // 速度直接模式数据
-static const uint8_t POS_DATA[]         = {0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00}; // 进入位置斜坡模式
+static const uint8_t POS_DATA[]         = {0x03, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00}; // 进入位置梯形模式
 static const uint8_t TORQUE_DIRECT_MODE_DATA[] = {0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}; // 力矩直接模式数据
 static const uint8_t CLEAR_ERROR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 清除错误和异常数据
 static const uint8_t RESTART_MOTOR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 重启电机数据
@@ -308,6 +310,19 @@ void send_target_position(uint8_t motor_id, float position) {
     uint8_t can_data[8] = {0};
     memcpy(can_data, &position, sizeof(position)); // Copy float position to CAN data
     send_can_frame("设置目标位置", BASE_TARGET_POS_ID, can_data, sizeof(can_data), motor_id);
+}
+
+void set_position_velocity_limit(uint8_t motor_id, float velocity_limit) {
+    uint8_t can_data[8] = {0};
+    memcpy(can_data, &velocity_limit, sizeof(velocity_limit)); // 前4字节为速度限制，后4字节为0
+    send_can_frame("设置位置模式速度限制", BASE_POS_VEL_LIMIT_ID, can_data, sizeof(can_data), motor_id);
+}
+
+void set_position_acceleration_limits(uint8_t motor_id, float acceleration_limit, float deceleration_limit) {
+    uint8_t can_data[8] = {0};
+    memcpy(can_data, &acceleration_limit, sizeof(acceleration_limit));     // 前4字节为加速度限制
+    memcpy(can_data + 4, &deceleration_limit, sizeof(deceleration_limit)); // 后4字节为减速度限制
+    send_can_frame("设置位置模式加速度限制", BASE_POS_ACC_LIMIT_ID, can_data, sizeof(can_data), motor_id);
 }
 
 void send_target_velocity(uint8_t motor_id, float velocity) {
