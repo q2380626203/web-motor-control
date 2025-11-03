@@ -152,29 +152,27 @@ void motor_init_task(void *pvParameters) {
     } else {
         ESP_LOGE(TAG, "G代码控制器初始化失败");
     }
-    
-    // /* 注释掉UART监听器 - 现在使用TWAI，电机响应也通过CAN接收
-    // 初始化并启动UART监听器（专门监听电机控制的UART1接收数据）
-    // uart_monitor_config_t uart_config = {
-    //     .uart_port = UART_NUM_1,        // 使用UART1（与电机控制相同）
-    //     .buf_size = 1024,               // 缓冲区大小
-    //     .tag = "UART监听",               // 日志标签
-    //     .init_uart = false              // 复用已初始化的UART1
-    // };
-    //
-    // uart_monitor = uart_monitor_init(&uart_config);
-    // if (uart_monitor) {
-    //     if (uart_monitor_start(uart_monitor)) {
-    //         ESP_LOGI(TAG, "UART数据监听器启动成功");
-    //     } else {
-    //         ESP_LOGE(TAG, "UART数据监听器启动失败");
-    //     }
-    // } else {
-    //     ESP_LOGE(TAG, "UART数据监听器初始化失败");
-    // }
-    // */
 
-    // 注意：电机响应现在通过CAN总线接收，由CAN监听器处理
+    // 初始化并启动TWAI电机数据监听器（专门监听电机响应数据）
+    // 该监听器复用motor_control已初始化的TWAI驱动，不会重复初始化
+    uart_monitor_config_t uart_config = {
+        .tx_gpio = GPIO_NUM_13,         // CAN TX引脚（与motor_control相同）
+        .rx_gpio = GPIO_NUM_12,         // CAN RX引脚
+        .tag = "电机响应监听"             // 日志标签
+    };
+
+    uart_monitor = uart_monitor_init(&uart_config);
+    if (uart_monitor) {
+        if (uart_monitor_start(uart_monitor)) {
+            ESP_LOGI(TAG, "TWAI电机数据监听器启动成功");
+        } else {
+            ESP_LOGE(TAG, "TWAI电机数据监听器启动失败");
+        }
+    } else {
+        ESP_LOGE(TAG, "TWAI电机数据监听器初始化失败");
+    }
+
+    // 注意：电机响应现在通过CAN总线接收，由uart_monitor（实际使用TWAI）处理
 
     // /* 注释掉CAN监听器 - TWAI已经被motor_control初始化，避免重复初始化
     // 如果需要监听CAN数据，应该修改can_monitor使其不重新初始化TWAI驱动
@@ -206,16 +204,16 @@ void motor_init_task(void *pvParameters) {
     ESP_LOGI(TAG, "当前控制电机ID: 1 和 4");
     ESP_LOGI(TAG, "电机1 CAN基础ID + 0x00, 电机4 CAN基础ID + 0x60");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
-    ESP_LOGI(TAG, "CAN总线配置: TX=GPIO13, RX=GPIO12, 500kbps标准帧");
+    ESP_LOGI(TAG, "CAN总线配置: TX=GPIO12, RX=GPIO13, 500kbps标准帧");
     ESP_LOGI(TAG, "电机控制通过TWAI直接发送CAN指令");
     ESP_LOGI(TAG, "Web界面支持: 位置/速度/力矩模式控制");
 
     // ========== 所有初始化完成后，设置电机1和电机4 ==========
-    // ESP_LOGI(TAG, "");
-    // ESP_LOGI(TAG, "========== 开始配置电机运行参数 ==========");
-    // vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "========== 开始配置电机运行参数 ==========");
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // // 1. 设置电机1为速度模式
+    // 1. 设置电机1为速度模式
     // ESP_LOGI(TAG, "[电机1] 设置为速度模式...");
     // motor_control_set_velocity_mode(motor_controller_1);
     // vTaskDelay(pdMS_TO_TICKS(1000));  // 指令间隔5ms

@@ -7,7 +7,7 @@
 static const char *TAG = "MOTOR_SCHEDULER";
 
 #define MIN_FREQUENCY 0.5f
-#define MAX_FREQUENCY 5.0f
+#define MAX_FREQUENCY 1000.0f
 #define DEFAULT_FREQUENCY 2.0f
 #define QUERY_TYPES_COUNT 5
 #define QUERY_QUEUE_SIZE 10
