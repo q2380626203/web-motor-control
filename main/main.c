@@ -78,12 +78,9 @@ float external_torque_to_internal(float external_torque) {
 void motor_init_task(void *pvParameters) {
     // ========== 初始化电机1控制器 ==========
     motor_driver_config_t motor1_config = {
-        .uart_port = UART_NUM_1,
-        .txd_pin = GPIO_NUM_10,
-        .rxd_pin = GPIO_NUM_11,
-        .baud_rate = 115200,
-        .buf_size = 1024,
-        .motor_id = 1  // 电机ID 1
+        .tx_pin = GPIO_NUM_13,   // CAN TX引脚（与CAN监听器使用相同引脚）
+        .rx_pin = GPIO_NUM_12,   // CAN RX引脚
+        .motor_id = 1            // 电机ID 1
     };
 
     motor_controller_1 = motor_control_init(&motor1_config);
@@ -96,12 +93,9 @@ void motor_init_task(void *pvParameters) {
 
     // ========== 初始化电机4控制器 ==========
     motor_driver_config_t motor4_config = {
-        .uart_port = UART_NUM_1,    // 共享同一个UART
-        .txd_pin = GPIO_NUM_10,
-        .rxd_pin = GPIO_NUM_11,
-        .baud_rate = 115200,
-        .buf_size = 1024,
-        .motor_id = 4  // 电机ID 4
+        .tx_pin = GPIO_NUM_13,   // CAN TX引脚（共享CAN总线）
+        .rx_pin = GPIO_NUM_12,   // CAN RX引脚
+        .motor_id = 4            // 电机ID 4
     };
 
     motor_controller_4 = motor_control_init(&motor4_config);
@@ -131,7 +125,7 @@ void motor_init_task(void *pvParameters) {
     // 初始化状态查询调度器（使用电机1）
     scheduler_config_t scheduler_config = {
         .frequency = 1.0f,               // 默认1Hz查询频率
-        .uart_port = UART_NUM_1,         // 使用与电机控制相同的UART端口
+        // .uart_port = UART_NUM_1,      // 注释掉：不再需要UART，使用TWAI
         .motor_id = motor1_config.motor_id,  // 使用电机1的ID
         .enable_all_queries = false      // 默认不启动自动查询，等待用户手动启动
     };
@@ -203,7 +197,7 @@ void motor_init_task(void *pvParameters) {
     ESP_LOGI(TAG, "当前控制电机ID: 1 和 4");
     ESP_LOGI(TAG, "电机1 CAN基础ID + 0x00, 电机4 CAN基础ID + 0x60");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
-    ESP_LOGI(TAG, "UART1监听: 电机响应数据 (GPIO10-TX, GPIO11-RX) @ 115200 baud");
+    ESP_LOGI(TAG, "CAN总线配置: TX=GPIO13, RX=GPIO12, 500kbps标准帧");
     ESP_LOGI(TAG, "CAN监听: G代码数据 (GPIO13-TX, GPIO12-RX) @ 500K baud");
     ESP_LOGI(TAG, "支持G代码命令: G1 X{角度}(位置模式), G1 F{速度}(速度模式), G1 T{力矩}(力矩模式), M0/M1(失能/使能)");
 

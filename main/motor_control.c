@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+// #include "driver/uart.h"  // 注释掉UART，改用TWAI
+#include "driver/twai.h"
+
+// TWAI全局状态
+static bool g_twai_initialized = false;
 
 // ====================================================================================
 // --- 常量定义 ---
@@ -57,8 +62,42 @@ static const uint8_t RESTART_MOTOR_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 static const uint8_t QUERY_DATA[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 查询指令通用数据
 
 // 内部函数声明
-static void send_serial_can_frame(uart_port_t uart_port, const char* cmd_name,
-                                 uint32_t id, const uint8_t *data, uint8_t len, uint8_t motor_id);
+static void send_can_frame(const char* cmd_name, uint32_t id, const uint8_t *data, uint8_t len, uint8_t motor_id);
+
+// TWAI初始化函数（只初始化一次）
+static esp_err_t ensure_twai_initialized(gpio_num_t tx_pin, gpio_num_t rx_pin) {
+    if (g_twai_initialized) {
+        return ESP_OK;  // 已经初始化过
+    }
+
+    // 配置TWAI的通用配置
+    twai_general_config_t general_config = TWAI_GENERAL_CONFIG_DEFAULT(tx_pin, rx_pin, TWAI_MODE_NORMAL);
+
+    // 配置500kbps标准帧
+    twai_timing_config_t timing_config = TWAI_TIMING_CONFIG_500KBITS();
+
+    // 接受所有消息
+    twai_filter_config_t filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+    // 安装TWAI驱动
+    esp_err_t result = twai_driver_install(&general_config, &timing_config, &filter_config);
+    if (result != ESP_OK) {
+        printf("[错误] TWAI驱动安装失败: %s\n", esp_err_to_name(result));
+        return result;
+    }
+
+    // 启动TWAI驱动
+    result = twai_start();
+    if (result != ESP_OK) {
+        printf("[错误] TWAI启动失败: %s\n", esp_err_to_name(result));
+        twai_driver_uninstall();
+        return result;
+    }
+
+    g_twai_initialized = true;
+    printf("[信息] TWAI驱动初始化成功 - 500kbps标准帧模式\n");
+    return ESP_OK;
+}
 
 // ====================================================================================
 // --- 电机控制器主要接口实现 ---
@@ -83,26 +122,32 @@ motor_controller_t* motor_control_init(const motor_driver_config_t* driver_confi
     // 初始化电机状态
     controller->motor_enabled = false;
 
-    // 初始化UART
-    uart_config_t uart_config = {
-        .baud_rate = driver_config->baud_rate,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT
-    };
-    
-    uart_driver_install(driver_config->uart_port, driver_config->buf_size * 2, 0, 0, NULL, 0);
-    uart_param_config(driver_config->uart_port, &uart_config);
-    uart_set_pin(driver_config->uart_port, driver_config->txd_pin, driver_config->rxd_pin, 
-                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    // 初始化TWAI (CAN总线) - 只初始化一次
+    esp_err_t result = ensure_twai_initialized(driver_config->tx_pin, driver_config->rx_pin);
+    if (result != ESP_OK) {
+        printf("[错误] TWAI初始化失败！\n");
+        free(controller);
+        return NULL;
+    }
 
-    // 初始化电机（不设置模式，等待后续配置）
-    printf("[信息] 电机UART已配置，等待模式设置\n");
+    // /* 注释掉UART初始化代码
+    // uart_config_t uart_config = {
+    //     .baud_rate = driver_config->baud_rate,
+    //     .data_bits = UART_DATA_8_BITS,
+    //     .parity = UART_PARITY_DISABLE,
+    //     .stop_bits = UART_STOP_BITS_1,
+    //     .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    //     .source_clk = UART_SCLK_DEFAULT
+    // };
+    //
+    // uart_driver_install(driver_config->uart_port, driver_config->buf_size * 2, 0, 0, NULL, 0);
+    // uart_param_config(driver_config->uart_port, &uart_config);
+    // uart_set_pin(driver_config->uart_port, driver_config->txd_pin, driver_config->rxd_pin,
+    //              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    // */
 
-    printf("[信息] 电机控制器在 UART%d 上初始化完成\n", 
-           driver_config->uart_port);
+    printf("[信息] 电机控制器初始化完成 - 电机ID:%d, CAN TX:%d, RX:%d\n",
+           driver_config->motor_id, driver_config->tx_pin, driver_config->rx_pin);
     return controller;
 }
 
@@ -112,12 +157,16 @@ void motor_control_deinit(motor_controller_t* controller) {
     // 失能电机
     motor_control_enable(controller, false);
 
-    // 删除UART驱动
-    uart_driver_delete(controller->driver_config.uart_port);
+    // /* 注释掉UART驱动卸载
+    // uart_driver_delete(controller->driver_config.uart_port);
+    // */
+
+    // 注意：TWAI驱动可能被多个控制器共享，不在这里卸载
+    // 如果需要完全关闭TWAI，需要单独的全局清理函数
 
     // 释放内存
     free(controller);
-    
+
     printf("[信息] 电机控制器已销毁\n");
 }
 
@@ -125,11 +174,11 @@ void motor_control_enable(motor_controller_t* controller, bool enable) {
     if (!controller) return;
 
     if (enable) {
-        enable_motor(controller->driver_config.uart_port, controller->driver_config.motor_id);
+        enable_motor(controller->driver_config.motor_id);
         controller->motor_enabled = true;
         printf("[信息] 电机%d已使能\n", controller->driver_config.motor_id);
     } else {
-        disable_motor(controller->driver_config.uart_port, controller->driver_config.motor_id);
+        disable_motor(controller->driver_config.motor_id);
         controller->motor_enabled = false;
         printf("[信息] 电机%d已失能\n", controller->driver_config.motor_id);
     }
@@ -139,42 +188,42 @@ void motor_control_enable(motor_controller_t* controller, bool enable) {
 void motor_control_set_velocity_mode(motor_controller_t* controller) {
     if (!controller) return;
 
-    set_motor_velocity_mode(controller->driver_config.uart_port, controller->driver_config.motor_id);
+    set_motor_velocity_mode(controller->driver_config.motor_id);
     printf("[信息] 电机%d已设置为速度模式\n", controller->driver_config.motor_id);
 }
 
 void motor_control_set_velocity(motor_controller_t* controller, float velocity) {
     if (!controller) return;
 
-    send_target_velocity(controller->driver_config.uart_port, controller->driver_config.motor_id, velocity);
+    send_target_velocity(controller->driver_config.motor_id, velocity);
     printf("[信息] 电机%d目标速度设置为: %.2f r/s\n", controller->driver_config.motor_id, velocity);
 }
 
 void motor_control_set_position_mode(motor_controller_t* controller) {
     if (!controller) return;
 
-    set_motor_position_mode(controller->driver_config.uart_port, controller->driver_config.motor_id);
+    set_motor_position_mode(controller->driver_config.motor_id);
     printf("[信息] 电机%d已设置为位置模式\n", controller->driver_config.motor_id);
 }
 
 void motor_control_set_position(motor_controller_t* controller, float position) {
     if (!controller) return;
 
-    send_target_position(controller->driver_config.uart_port, controller->driver_config.motor_id, position);
+    send_target_position(controller->driver_config.motor_id, position);
     printf("[信息] 电机%d目标位置设置为: %.2f\n", controller->driver_config.motor_id, position);
 }
 
 void motor_control_set_torque_mode(motor_controller_t* controller) {
     if (!controller) return;
 
-    set_motor_torque_mode(controller->driver_config.uart_port, controller->driver_config.motor_id);
+    set_motor_torque_mode(controller->driver_config.motor_id);
     printf("[信息] 电机%d已设置为力矩模式\n", controller->driver_config.motor_id);
 }
 
 void motor_control_set_torque(motor_controller_t* controller, float torque) {
     if (!controller) return;
 
-    send_target_torque(controller->driver_config.uart_port, controller->driver_config.motor_id, torque);
+    send_target_torque(controller->driver_config.motor_id, torque);
     printf("[信息] 电机%d目标力矩设置为: %.2f Nm\n", controller->driver_config.motor_id, torque);
 }
 
@@ -182,7 +231,7 @@ void motor_control_set_torque(motor_controller_t* controller, float torque) {
 void motor_control_clear_errors(motor_controller_t* controller) {
     if (!controller) return;
 
-    clear_motor_errors(controller->driver_config.uart_port, controller->driver_config.motor_id);
+    clear_motor_errors(controller->driver_config.motor_id);
     printf("[信息] 电机%d错误和异常已清除\n", controller->driver_config.motor_id);
 }
 
@@ -195,6 +244,41 @@ bool motor_control_is_enabled(motor_controller_t* controller) {
 // --- 低级别电机驱动函数实现 ---
 // ====================================================================================
 
+/**
+ * @brief 使用TWAI发送CAN帧到电机
+ * @param cmd_name 命令名称（用于日志）
+ * @param base_id 基础CAN ID
+ * @param data CAN数据（8字节）
+ * @param len 数据长度
+ * @param motor_id 电机ID (1-4)
+ */
+static void send_can_frame(const char* cmd_name, uint32_t base_id, const uint8_t *data, uint8_t len, uint8_t motor_id) {
+    // 根据电机ID计算实际CAN ID
+    uint32_t actual_id = get_can_id(base_id, motor_id);
+
+    // 构建TWAI消息
+    twai_message_t tx_msg = {
+        .identifier = actual_id,      // CAN ID
+        .extd = 0,                     // 标准帧（不是扩展帧）
+        .rtr = 0,                      // 数据帧（不是远程帧）
+        .data_length_code = len,       // 数据长度
+    };
+
+    // 复制数据到消息
+    memcpy(tx_msg.data, data, len);
+
+    // 发送CAN消息
+    esp_err_t result = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));  // 1秒超时
+    if (result == ESP_OK) {
+        printf("[CAN] 发送成功: %s [电机%d], ID:0x%04lX, 数据长度:%d\n",
+               cmd_name, motor_id, (unsigned long)actual_id, len);
+    } else {
+        printf("[CAN错误] 发送失败: %s [电机%d], ID:0x%04lX, 错误:%s\n",
+               cmd_name, motor_id, (unsigned long)actual_id, esp_err_to_name(result));
+    }
+}
+
+/* 注释掉原来的UART版本
 static void send_serial_can_frame(uart_port_t uart_port, const char* cmd_name,
                                  uint32_t base_id, const uint8_t *data, uint8_t len, uint8_t motor_id) {
     // 根据电机ID计算实际CAN ID
@@ -210,67 +294,68 @@ static void send_serial_can_frame(uart_port_t uart_port, const char* cmd_name,
 
     printf("[UART] 发送: %s [电机%d], ID:0x%04lX, 10字节\n", cmd_name, motor_id, (unsigned long)actual_id);
 }
+*/
 
-void set_motor_velocity_mode(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "设置速度模式", BASE_VEL_MODE_ID, VEL_DIRECT_MODE_DATA, sizeof(VEL_DIRECT_MODE_DATA), motor_id);
+void set_motor_velocity_mode(uint8_t motor_id) {
+    send_can_frame("设置速度模式", BASE_VEL_MODE_ID, VEL_DIRECT_MODE_DATA, sizeof(VEL_DIRECT_MODE_DATA), motor_id);
 }
 
-void set_motor_position_mode(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "设置位置模式", BASE_POS_MODE_ID, POS_DATA, sizeof(POS_DATA), motor_id);
+void set_motor_position_mode(uint8_t motor_id) {
+    send_can_frame("设置位置模式", BASE_POS_MODE_ID, POS_DATA, sizeof(POS_DATA), motor_id);
 }
 
-void send_target_position(uart_port_t uart_port, uint8_t motor_id, float position) {
+void send_target_position(uint8_t motor_id, float position) {
     uint8_t can_data[8] = {0};
     memcpy(can_data, &position, sizeof(position)); // Copy float position to CAN data
-    send_serial_can_frame(uart_port, "设置目标位置", BASE_TARGET_POS_ID, can_data, sizeof(can_data), motor_id);
+    send_can_frame("设置目标位置", BASE_TARGET_POS_ID, can_data, sizeof(can_data), motor_id);
 }
 
-void send_target_velocity(uart_port_t uart_port, uint8_t motor_id, float velocity) {
+void send_target_velocity(uint8_t motor_id, float velocity) {
     uint8_t can_data[8] = {0};
     memcpy(can_data, &velocity, sizeof(velocity)); // Copy float velocity to CAN data
-    send_serial_can_frame(uart_port, "设置目标速度", BASE_TARGET_VEL_ID, can_data, sizeof(can_data), motor_id);
+    send_can_frame("设置目标速度", BASE_TARGET_VEL_ID, can_data, sizeof(can_data), motor_id);
 }
 
-void set_motor_torque_mode(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "设置力矩模式", BASE_TORQUE_MODE_ID, TORQUE_DIRECT_MODE_DATA, sizeof(TORQUE_DIRECT_MODE_DATA), motor_id);
+void set_motor_torque_mode(uint8_t motor_id) {
+    send_can_frame("设置力矩模式", BASE_TORQUE_MODE_ID, TORQUE_DIRECT_MODE_DATA, sizeof(TORQUE_DIRECT_MODE_DATA), motor_id);
 }
 
-void send_target_torque(uart_port_t uart_port, uint8_t motor_id, float torque) {
+void send_target_torque(uint8_t motor_id, float torque) {
     uint8_t can_data[8] = {0};
     memcpy(can_data, &torque, sizeof(torque)); // Copy float torque to CAN data
-    send_serial_can_frame(uart_port, "设置目标力矩", BASE_TARGET_TORQUE_ID, can_data, sizeof(can_data), motor_id);
+    send_can_frame("设置目标力矩", BASE_TARGET_TORQUE_ID, can_data, sizeof(can_data), motor_id);
 }
 
-void enable_motor(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "致能马达", BASE_ENABLE_ID, ENABLE_DATA, sizeof(ENABLE_DATA), motor_id);
+void enable_motor(uint8_t motor_id) {
+    send_can_frame("致能马达", BASE_ENABLE_ID, ENABLE_DATA, sizeof(ENABLE_DATA), motor_id);
 }
 
-void disable_motor(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "失能马达", BASE_ENABLE_ID, DISABLE_DATA, sizeof(DISABLE_DATA), motor_id);
+void disable_motor(uint8_t motor_id) {
+    send_can_frame("失能马达", BASE_ENABLE_ID, DISABLE_DATA, sizeof(DISABLE_DATA), motor_id);
 }
 
 
-void clear_motor_errors(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "清除错误和异常", BASE_CLEAR_ERROR_ID, CLEAR_ERROR_DATA, sizeof(CLEAR_ERROR_DATA), motor_id);
+void clear_motor_errors(uint8_t motor_id) {
+    send_can_frame("清除错误和异常", BASE_CLEAR_ERROR_ID, CLEAR_ERROR_DATA, sizeof(CLEAR_ERROR_DATA), motor_id);
 }
 
-void restart_motor(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "重启电机", BASE_RESTART_MOTOR_ID, RESTART_MOTOR_DATA, sizeof(RESTART_MOTOR_DATA), motor_id);
+void restart_motor(uint8_t motor_id) {
+    send_can_frame("重启电机", BASE_RESTART_MOTOR_ID, RESTART_MOTOR_DATA, sizeof(RESTART_MOTOR_DATA), motor_id);
 }
 
-void query_motor_torque(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "查询电机力矩", BASE_QUERY_TORQUE_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
+void query_motor_torque(uint8_t motor_id) {
+    send_can_frame("查询电机力矩", BASE_QUERY_TORQUE_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
 }
 
-void query_motor_power(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "查询电机功率", BASE_QUERY_POWER_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
+void query_motor_power(uint8_t motor_id) {
+    send_can_frame("查询电机功率", BASE_QUERY_POWER_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
 }
 
-void query_encoder_count(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "查询编码器计数", BASE_QUERY_ENCODER_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
+void query_encoder_count(uint8_t motor_id) {
+    send_can_frame("查询编码器计数", BASE_QUERY_ENCODER_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
 }
 
-void query_motor_exceptions(uart_port_t uart_port, uint8_t motor_id, int exception_type) {
+void query_motor_exceptions(uint8_t motor_id, int exception_type) {
     uint8_t exception_data[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     if (exception_type >= 0 && exception_type <= 4) {
         exception_data[0] = exception_type;
@@ -278,11 +363,11 @@ void query_motor_exceptions(uart_port_t uart_port, uint8_t motor_id, int excepti
         g_last_exception_query_type = exception_type;
         ESP_LOGI("MOTOR_CONTROL", "设置异常查询类型为: %d", exception_type);
     }
-    send_serial_can_frame(uart_port, "查询电机异常", BASE_QUERY_EXCEPTION_ID, exception_data, sizeof(exception_data), motor_id);
+    send_can_frame("查询电机异常", BASE_QUERY_EXCEPTION_ID, exception_data, sizeof(exception_data), motor_id);
 }
 
-void query_motor_position_speed(uart_port_t uart_port, uint8_t motor_id) {
-    send_serial_can_frame(uart_port, "查询位置和转速", BASE_QUERY_POS_SPEED_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
+void query_motor_position_speed(uint8_t motor_id) {
+    send_can_frame("查询位置和转速", BASE_QUERY_POS_SPEED_ID, QUERY_DATA, sizeof(QUERY_DATA), motor_id);
 }
 
 int get_last_exception_query_type(void) {

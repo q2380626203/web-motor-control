@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "driver/uart.h"
+// #include "driver/uart.h"  // 注释掉UART驱动，改用TWAI
+#include "driver/twai.h"
 #include "driver/gpio.h"
 
 #ifdef __cplusplus
@@ -16,11 +17,11 @@ extern "C" {
 
 // 电机驱动配置结构
 typedef struct {
-    uart_port_t uart_port;          // UART端口号
-    gpio_num_t txd_pin;             // TXD引脚
-    gpio_num_t rxd_pin;             // RXD引脚
-    int baud_rate;                  // 波特率
-    int buf_size;                   // 缓冲区大小
+    // uart_port_t uart_port;       // 注释掉：UART端口号
+    gpio_num_t tx_pin;              // CAN TX引脚（原TXD）
+    gpio_num_t rx_pin;              // CAN RX引脚（原RXD）
+    // int baud_rate;               // 注释掉：波特率（改用CAN速率500kbps）
+    // int buf_size;                // 注释掉：缓冲区大小（TWAI有自己的队列配置）
     uint8_t motor_id;               // 电机ID (1-4), ID偏移量 = (motor_id-1)*0x20
 } motor_driver_config_t;
 
@@ -143,106 +144,92 @@ bool motor_control_is_enabled(motor_controller_t* controller);
 
 /**
  * @brief 设置电机为速度直接模式
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void set_motor_velocity_mode(uart_port_t uart_port, uint8_t motor_id);
+void set_motor_velocity_mode(uint8_t motor_id);
 
 /**
  * @brief 设置电机为位置模式
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void set_motor_position_mode(uart_port_t uart_port, uint8_t motor_id);
+void set_motor_position_mode(uint8_t motor_id);
 
 /**
  * @brief 发送目标位置
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  * @param position 目标位置
  */
-void send_target_position(uart_port_t uart_port, uint8_t motor_id, float position);
+void send_target_position(uint8_t motor_id, float position);
 
 /**
  * @brief 发送目标速度
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  * @param velocity 目标速度 (r/s)
  */
-void send_target_velocity(uart_port_t uart_port, uint8_t motor_id, float velocity);
+void send_target_velocity(uint8_t motor_id, float velocity);
 
 /**
  * @brief 设置电机为力矩模式
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void set_motor_torque_mode(uart_port_t uart_port, uint8_t motor_id);
+void set_motor_torque_mode(uint8_t motor_id);
 
 /**
  * @brief 发送目标力矩
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  * @param torque 目标力矩 (Nm)
  */
-void send_target_torque(uart_port_t uart_port, uint8_t motor_id, float torque);
+void send_target_torque(uint8_t motor_id, float torque);
 
 /**
  * @brief 使能电机
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void enable_motor(uart_port_t uart_port, uint8_t motor_id);
+void enable_motor(uint8_t motor_id);
 
 /**
  * @brief 失能电机
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void disable_motor(uart_port_t uart_port, uint8_t motor_id);
+void disable_motor(uint8_t motor_id);
 
 
 /**
  * @brief 清除电机错误和异常
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void clear_motor_errors(uart_port_t uart_port, uint8_t motor_id);
+void clear_motor_errors(uint8_t motor_id);
 
 /**
  * @brief 重启电机
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void restart_motor(uart_port_t uart_port, uint8_t motor_id);
+void restart_motor(uint8_t motor_id);
 
 /**
  * @brief 查询电机目标力矩和当前力矩
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void query_motor_torque(uart_port_t uart_port, uint8_t motor_id);
+void query_motor_torque(uint8_t motor_id);
 
 /**
  * @brief 查询电机电功率和机械功率
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void query_motor_power(uart_port_t uart_port, uint8_t motor_id);
+void query_motor_power(uint8_t motor_id);
 
 /**
  * @brief 查询编码器多圈计数和单圈计数
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void query_encoder_count(uart_port_t uart_port, uint8_t motor_id);
+void query_encoder_count(uint8_t motor_id);
 
 /**
  * @brief 查询电机异常信息
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  * @param exception_type 异常类型 (0-4: 电机异常/编码器异常/控制异常/系统异常)
  */
-void query_motor_exceptions(uart_port_t uart_port, uint8_t motor_id, int exception_type);
+void query_motor_exceptions(uint8_t motor_id, int exception_type);
 
 /**
  * @brief 获取最后查询的异常类型
@@ -252,10 +239,9 @@ int get_last_exception_query_type(void);
 
 /**
  * @brief 查询电机转子位置和转速
- * @param uart_port UART端口
  * @param motor_id 电机ID (1-4)
  */
-void query_motor_position_speed(uart_port_t uart_port, uint8_t motor_id);
+void query_motor_position_speed(uint8_t motor_id);
 
 // ====================================================================================
 // --- 数据解析函数 ---

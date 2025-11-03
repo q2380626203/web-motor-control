@@ -32,23 +32,23 @@ static void query_task(void *pvParameters) {
             // 根据事件类型执行相应的查询操作
             switch (event.type) {
                 case QUERY_EVENT_TORQUE:
-                    query_motor_torque(event.uart_port, event.motor_id);
+                    query_motor_torque(event.motor_id);
                     ESP_LOGI(TAG, "自动查询力矩 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_POWER:
-                    query_motor_power(event.uart_port, event.motor_id);
+                    query_motor_power(event.motor_id);
                     ESP_LOGI(TAG, "自动查询功率 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_ENCODER:
-                    query_encoder_count(event.uart_port, event.motor_id);
+                    query_encoder_count(event.motor_id);
                     ESP_LOGI(TAG, "自动查询编码器 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_POSITION_SPEED:
-                    query_motor_position_speed(event.uart_port, event.motor_id);
+                    query_motor_position_speed(event.motor_id);
                     ESP_LOGI(TAG, "自动查询位置速度 [电机%d]", event.motor_id);
                     break;
                 case QUERY_EVENT_EXCEPTIONS:
-                    query_motor_exceptions(event.uart_port, event.motor_id, event.exception_type);
+                    query_motor_exceptions(event.motor_id, event.exception_type);
                     ESP_LOGI(TAG, "自动查询异常状态 [电机%d] (类型:%d)", event.motor_id, event.exception_type);
                     break;
                 default:
@@ -78,7 +78,7 @@ motor_status_scheduler_t* motor_status_scheduler_init(const scheduler_config_t* 
     
     scheduler->query_frequency = config->frequency;
     scheduler->auto_query_enabled = config->enable_all_queries;
-    scheduler->uart_port = config->uart_port;
+    // scheduler->uart_port = config->uart_port;  // 注释掉：不再需要UART
     scheduler->motor_id = config->motor_id;
     scheduler->current_query_index = 0;
     scheduler->current_exception_type = 0;
@@ -139,7 +139,7 @@ static void query_timer_callback(TimerHandle_t xTimer) {
 
     // 创建查询事件
     query_event_t event;
-    event.uart_port = scheduler->uart_port;
+    // event.uart_port = scheduler->uart_port;  // 注释掉：不再需要UART
     event.motor_id = scheduler->motor_id;
     event.type = (query_event_type_t)scheduler->current_query_index;
     event.exception_type = 0; // 默认值

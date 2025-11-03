@@ -7,7 +7,7 @@
 #include "freertos/timers.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "driver/uart.h"
+// #include "driver/uart.h"  // 注释掉：不再需要UART
 
 // 查询事件类型
 typedef enum {
@@ -22,15 +22,15 @@ typedef enum {
 // 查询事件结构
 typedef struct {
     query_event_type_t type;
-    uart_port_t uart_port;
-    uint8_t motor_id;        // 电机ID (1-4)
-    int exception_type;      // 异常查询类型(0-4)，其他查询忽略
+    // uart_port_t uart_port;    // 注释掉：不再需要UART端口，使用TWAI
+    uint8_t motor_id;            // 电机ID (1-4)
+    int exception_type;          // 异常查询类型(0-4)，其他查询忽略
 } query_event_t;
 
 typedef struct {
     float query_frequency;          // 查询频率 (Hz)
     bool auto_query_enabled;        // 是否启用自动查询
-    uart_port_t uart_port;          // UART端口
+    // uart_port_t uart_port;       // 注释掉：不再需要UART端口
     uint8_t motor_id;               // 电机ID (1-4)
     TimerHandle_t query_timer;      // FreeRTOS定时器句柄
     uint8_t current_query_index;    // 当前查询索引(轮询不同状态)
@@ -44,7 +44,7 @@ typedef struct {
 
 typedef struct {
     float frequency;                // 查询频率 (Hz, 范围: 1.0 - 100.0)
-    uart_port_t uart_port;         // UART端口
+    // uart_port_t uart_port;       // 注释掉：不再需要UART端口
     uint8_t motor_id;              // 电机ID (1-4)
     bool enable_all_queries;       // 是否启用全部查询类型
 } scheduler_config_t;
