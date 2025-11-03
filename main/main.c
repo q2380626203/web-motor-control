@@ -175,35 +175,40 @@ void motor_init_task(void *pvParameters) {
     // */
 
     // 注意：电机响应现在通过CAN总线接收，由CAN监听器处理
-    
+
+    // /* 注释掉CAN监听器 - TWAI已经被motor_control初始化，避免重复初始化
+    // 如果需要监听CAN数据，应该修改can_monitor使其不重新初始化TWAI驱动
     // 初始化并启动CAN监听器（专门监听G代码CAN数据）
-    can_monitor_config_t can_config = {
-        .tx_gpio = GPIO_NUM_13,               // CAN TX引脚
-        .rx_gpio = GPIO_NUM_12,               // CAN RX引脚
-        .timing_config = TWAI_TIMING_CONFIG_500KBITS(), // 500K波特率
-        .filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL(), // 接收所有消息
-        .tag = "CAN监听",                    // 日志标签
-        .gcode_controller = g_gcode_controller // G代码控制器
-    };
-    
-    can_monitor = can_monitor_init(&can_config);
-    if (can_monitor) {
-        if (can_monitor_start(can_monitor)) {
-            ESP_LOGI(TAG, "CAN数据监听器启动成功");
-        } else {
-            ESP_LOGE(TAG, "CAN数据监听器启动失败");
-        }
-    } else {
-        ESP_LOGE(TAG, "CAN数据监听器初始化失败");
-    }
+    // can_monitor_config_t can_config = {
+    //     .tx_gpio = GPIO_NUM_13,               // CAN TX引脚
+    //     .rx_gpio = GPIO_NUM_12,               // CAN RX引脚
+    //     .timing_config = TWAI_TIMING_CONFIG_500KBITS(), // 500K波特率
+    //     .filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL(), // 接收所有消息
+    //     .tag = "CAN监听",                    // 日志标签
+    //     .gcode_controller = g_gcode_controller // G代码控制器
+    // };
+    //
+    // can_monitor = can_monitor_init(&can_config);
+    // if (can_monitor) {
+    //     if (can_monitor_start(can_monitor)) {
+    //         ESP_LOGI(TAG, "CAN数据监听器启动成功");
+    //     } else {
+    //         ESP_LOGE(TAG, "CAN数据监听器启动失败");
+    //     }
+    // } else {
+    //     ESP_LOGE(TAG, "CAN数据监听器初始化失败");
+    // }
+    // */
+
+    ESP_LOGI(TAG, "注意：TWAI已由motor_control模块初始化并管理");
     
     ESP_LOGI(TAG, "电机初始化完成，Web服务器已启动，G代码控制器已就绪");
     ESP_LOGI(TAG, "当前控制电机ID: 1 和 4");
     ESP_LOGI(TAG, "电机1 CAN基础ID + 0x00, 电机4 CAN基础ID + 0x60");
     ESP_LOGI(TAG, "请连接WiFi热点，然后访问: http://192.168.4.1");
     ESP_LOGI(TAG, "CAN总线配置: TX=GPIO13, RX=GPIO12, 500kbps标准帧");
-    ESP_LOGI(TAG, "CAN监听: G代码数据 (GPIO13-TX, GPIO12-RX) @ 500K baud");
-    ESP_LOGI(TAG, "支持G代码命令: G1 X{角度}(位置模式), G1 F{速度}(速度模式), G1 T{力矩}(力矩模式), M0/M1(失能/使能)");
+    ESP_LOGI(TAG, "电机控制通过TWAI直接发送CAN指令");
+    ESP_LOGI(TAG, "Web界面支持: 位置/速度/力矩模式控制");
 
     // ========== 所有初始化完成后，设置电机1和电机4 ==========
     // ESP_LOGI(TAG, "");
