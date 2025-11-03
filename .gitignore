@@ -46,3 +46,6 @@ dependencies.lock
 # OS specific
 *.swp
 *.swo
+
+# Claude Code
+.claude/
