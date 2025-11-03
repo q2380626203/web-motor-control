@@ -189,8 +189,7 @@ static esp_err_t clear_handler(httpd_req_t *req) {
 
 static esp_err_t restart_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        restart_motor(g_motor_controller->driver_config.uart_port,
-                     g_motor_controller->driver_config.motor_id);
+        restart_motor(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "成功", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机未初始化", HTTPD_RESP_USE_STRLEN);
@@ -280,8 +279,7 @@ static esp_err_t debug_page_handler(httpd_req_t *req) {
 // Debug功能处理器
 static esp_err_t debug_restart_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        restart_motor(g_motor_controller->driver_config.uart_port,
-                     g_motor_controller->driver_config.motor_id);
+        restart_motor(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "重启电机指令已发送", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
@@ -291,8 +289,7 @@ static esp_err_t debug_restart_handler(httpd_req_t *req) {
 
 static esp_err_t debug_query_torque_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        query_motor_torque(g_motor_controller->driver_config.uart_port,
-                          g_motor_controller->driver_config.motor_id);
+        query_motor_torque(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "查询力矩指令已发送", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
@@ -302,8 +299,7 @@ static esp_err_t debug_query_torque_handler(httpd_req_t *req) {
 
 static esp_err_t debug_query_power_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        query_motor_power(g_motor_controller->driver_config.uart_port,
-                         g_motor_controller->driver_config.motor_id);
+        query_motor_power(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "查询功率指令已发送", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
@@ -313,8 +309,7 @@ static esp_err_t debug_query_power_handler(httpd_req_t *req) {
 
 static esp_err_t debug_query_encoder_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        query_encoder_count(g_motor_controller->driver_config.uart_port,
-                           g_motor_controller->driver_config.motor_id);
+        query_encoder_count(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "查询编码器指令已发送", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
@@ -324,8 +319,7 @@ static esp_err_t debug_query_encoder_handler(httpd_req_t *req) {
 
 static esp_err_t debug_query_pos_speed_handler(httpd_req_t *req) {
     if (g_motor_controller) {
-        query_motor_position_speed(g_motor_controller->driver_config.uart_port,
-                                   g_motor_controller->driver_config.motor_id);
+        query_motor_position_speed(g_motor_controller->driver_config.motor_id);
         httpd_resp_send(req, "查询位置转速指令已发送", HTTPD_RESP_USE_STRLEN);
     } else {
         httpd_resp_send(req, "电机控制器未初始化", HTTPD_RESP_USE_STRLEN);
@@ -345,8 +339,7 @@ static esp_err_t debug_query_exception_handler(httpd_req_t *req) {
             }
         }
 
-        query_motor_exceptions(g_motor_controller->driver_config.uart_port,
-                              g_motor_controller->driver_config.motor_id,
+        query_motor_exceptions(g_motor_controller->driver_config.motor_id,
                               exception_type);
         char response[100];
         snprintf(response, sizeof(response), "查询异常指令已发送(类型: %d)", exception_type);
