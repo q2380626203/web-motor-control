@@ -153,24 +153,28 @@ void motor_init_task(void *pvParameters) {
         ESP_LOGE(TAG, "G代码控制器初始化失败");
     }
     
+    // /* 注释掉UART监听器 - 现在使用TWAI，电机响应也通过CAN接收
     // 初始化并启动UART监听器（专门监听电机控制的UART1接收数据）
-    uart_monitor_config_t uart_config = {
-        .uart_port = UART_NUM_1,        // 使用UART1（与电机控制相同）
-        .buf_size = 1024,               // 缓冲区大小
-        .tag = "UART监听",               // 日志标签
-        .init_uart = false              // 复用已初始化的UART1
-    };
-    
-    uart_monitor = uart_monitor_init(&uart_config);
-    if (uart_monitor) {
-        if (uart_monitor_start(uart_monitor)) {
-            ESP_LOGI(TAG, "UART数据监听器启动成功");
-        } else {
-            ESP_LOGE(TAG, "UART数据监听器启动失败");
-        }
-    } else {
-        ESP_LOGE(TAG, "UART数据监听器初始化失败");
-    }
+    // uart_monitor_config_t uart_config = {
+    //     .uart_port = UART_NUM_1,        // 使用UART1（与电机控制相同）
+    //     .buf_size = 1024,               // 缓冲区大小
+    //     .tag = "UART监听",               // 日志标签
+    //     .init_uart = false              // 复用已初始化的UART1
+    // };
+    //
+    // uart_monitor = uart_monitor_init(&uart_config);
+    // if (uart_monitor) {
+    //     if (uart_monitor_start(uart_monitor)) {
+    //         ESP_LOGI(TAG, "UART数据监听器启动成功");
+    //     } else {
+    //         ESP_LOGE(TAG, "UART数据监听器启动失败");
+    //     }
+    // } else {
+    //     ESP_LOGE(TAG, "UART数据监听器初始化失败");
+    // }
+    // */
+
+    // 注意：电机响应现在通过CAN总线接收，由CAN监听器处理
     
     // 初始化并启动CAN监听器（专门监听G代码CAN数据）
     can_monitor_config_t can_config = {
