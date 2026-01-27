@@ -11,12 +11,33 @@
 #include "gcode_unified_control.h"
 #include "motor_status_scheduler.h"
 
+// W5500 以太网相关头文件
+#include "esp_eth.h"
+#include "esp_eth_mac.h"
+#include "esp_eth_phy.h"
+#include "esp_eth_com.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+
 // 函数声明
 float angle_to_position(float angle_degrees);
 float external_velocity_to_internal(float external_velocity);
 float external_torque_to_internal(float external_torque);
 
 static const char *TAG = "MAIN";
+
+// W5500 SPI 引脚定义
+#define W5500_SPI_HOST      SPI2_HOST
+#define W5500_CS_GPIO       GPIO_NUM_1
+#define W5500_SCLK_GPIO     GPIO_NUM_2
+#define W5500_MISO_GPIO     GPIO_NUM_4  // 交换：原来是3，现在是4
+#define W5500_MOSI_GPIO     GPIO_NUM_3  // 交换：原来是4，现在是3
+#define W5500_INT_GPIO      -1  // 不使用中断引脚，使用轮询模式
+#define W5500_PHY_RST_GPIO  -1  // 不使用复位引脚
+#define W5500_PHY_ADDR      1
+#define W5500_POLL_MS       100 // 轮询周期 100ms
 
 // 全局变量
 static motor_controller_t* motor_controller = NULL;  // 主控制器（用于Web界面）
@@ -67,7 +88,7 @@ float external_velocity_to_internal(float external_velocity) {
 }
 
 /**
- * @brief 外部力矩转换为内部电机力矩  
+ * @brief 外部力矩转换为内部电机力矩
  * @param external_torque 外部期望力矩 (Nm) - 输出轴力矩
  * @return 内部电机需要的力矩 (Nm)
  */
@@ -75,6 +96,116 @@ float external_torque_to_internal(float external_torque) {
     // 力矩转换系数：30Nm外部 -> 11Nm内部
     // 转换系数 = 11/30 = 0.3667
     return external_torque * 0.3667f;
+}
+
+// ========== W5500 以太网初始化函数 ==========
+
+#if CONFIG_ETH_SPI_ETHERNET_W5500
+/**
+ * @brief 初始化 W5500 以太网
+ * @return esp_eth_handle_t 以太网句柄，失败返回 NULL
+ */
+static esp_eth_handle_t w5500_eth_init(void)
+{
+    esp_eth_handle_t eth_handle = NULL;
+
+    // 配置 SPI 总线
+    spi_bus_config_t buscfg = {
+        .miso_io_num = W5500_MISO_GPIO,
+        .mosi_io_num = W5500_MOSI_GPIO,
+        .sclk_io_num = W5500_SCLK_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+    };
+
+    ESP_LOGI(TAG, "初始化 SPI 总线: MISO=%d, MOSI=%d, SCLK=%d",
+             W5500_MISO_GPIO, W5500_MOSI_GPIO, W5500_SCLK_GPIO);
+
+    ESP_ERROR_CHECK(spi_bus_initialize(W5500_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
+
+    // 配置 SPI 设备接口
+    spi_device_interface_config_t devcfg = {
+        .mode = 0,
+        .clock_speed_hz = 20 * 1000 * 1000,  // 20 MHz
+        .queue_size = 20,
+        .spics_io_num = W5500_CS_GPIO
+    };
+
+    ESP_LOGI(TAG, "配置 W5500 SPI 设备: CS=%d, 时钟=20MHz", W5500_CS_GPIO);
+
+    // 初始化 MAC 和 PHY 配置
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = W5500_PHY_ADDR;
+    phy_config.reset_gpio_num = W5500_PHY_RST_GPIO;
+
+    // 配置 W5500
+    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(W5500_SPI_HOST, &devcfg);
+    w5500_config.int_gpio_num = W5500_INT_GPIO;
+    w5500_config.poll_period_ms = W5500_POLL_MS;
+
+    ESP_LOGI(TAG, "创建 W5500 MAC 和 PHY 实例");
+
+    esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
+
+    // 安装以太网驱动
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
+
+    // 设置 MAC 地址（可选）
+    uint8_t mac_addr[6] = {0x02, 0x00, 0x00, 0x12, 0x34, 0x56};
+    ESP_ERROR_CHECK(esp_eth_ioctl(eth_handle, ETH_CMD_S_MAC_ADDR, mac_addr));
+
+    ESP_LOGI(TAG, "W5500 以太网驱动初始化成功");
+
+    return eth_handle;
+}
+#endif // CONFIG_ETH_SPI_ETHERNET_W5500
+
+// ========== W5500 以太网事件处理函数 ==========
+
+/** W5500 以太网事件处理 */
+static void eth_event_handler(void *arg, esp_event_base_t event_base,
+                              int32_t event_id, void *event_data)
+{
+    uint8_t mac_addr[6] = {0};
+    esp_eth_handle_t eth_handle = *(esp_eth_handle_t *)event_data;
+
+    switch (event_id) {
+    case ETHERNET_EVENT_CONNECTED:
+        esp_eth_ioctl(eth_handle, ETH_CMD_G_MAC_ADDR, mac_addr);
+        ESP_LOGI(TAG, "W5500 以太网连接成功");
+        ESP_LOGI(TAG, "W5500 MAC地址: %02x:%02x:%02x:%02x:%02x:%02x",
+                 mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+        break;
+    case ETHERNET_EVENT_DISCONNECTED:
+        ESP_LOGI(TAG, "W5500 以太网断开连接");
+        break;
+    case ETHERNET_EVENT_START:
+        ESP_LOGI(TAG, "W5500 以太网已启动");
+        break;
+    case ETHERNET_EVENT_STOP:
+        ESP_LOGI(TAG, "W5500 以太网已停止");
+        break;
+    default:
+        break;
+    }
+}
+
+/** IP地址获取事件处理 */
+static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
+                                 int32_t event_id, void *event_data)
+{
+    ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+    const esp_netif_ip_info_t *ip_info = &event->ip_info;
+
+    ESP_LOGI(TAG, "W5500 获取到IP地址");
+    ESP_LOGI(TAG, "~~~~~~~~~~~");
+    ESP_LOGI(TAG, "IP地址:" IPSTR, IP2STR(&ip_info->ip));
+    ESP_LOGI(TAG, "子网掩码:" IPSTR, IP2STR(&ip_info->netmask));
+    ESP_LOGI(TAG, "网关:" IPSTR, IP2STR(&ip_info->gw));
+    ESP_LOGI(TAG, "~~~~~~~~~~~");
 }
 
 // 电机初始化任务
@@ -272,9 +403,40 @@ void app_main(void)
     // 初始化WiFi热点
     ESP_LOGI(TAG, "初始化WiFi热点模式");
     wifi_init_softap();
-    
+
+#if CONFIG_ETH_SPI_ETHERNET_W5500
+    // ========== 初始化 W5500 以太网 ==========
+    ESP_LOGI(TAG, "开始初始化 W5500 以太网...");
+
+    // 注意：WiFi 已经初始化了 esp_netif 和事件循环，这里不需要重复初始化
+
+    // 注册以太网事件处理器
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
+
+    // 初始化 W5500 以太网驱动
+    esp_eth_handle_t eth_handle = w5500_eth_init();
+    if (eth_handle == NULL) {
+        ESP_LOGE(TAG, "W5500 以太网初始化失败");
+    } else {
+        // 创建以太网网络接口
+        esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+        esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
+
+        // 将以太网驱动连接到 TCP/IP 栈
+        esp_eth_netif_glue_handle_t glue = esp_eth_new_netif_glue(eth_handle);
+        ESP_ERROR_CHECK(esp_netif_attach(eth_netif, glue));
+
+        // 启动以太网驱动
+        ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+        ESP_LOGI(TAG, "W5500 以太网已启动");
+    }
+#else
+    ESP_LOGI(TAG, "W5500 以太网未启用（需要在 menuconfig 中启用）");
+#endif // CONFIG_ETH_SPI_ETHERNET_W5500
+
     // 创建电机初始化任务 (增加栈大小以避免栈溢出)
     xTaskCreate(motor_init_task, "motor_init", 8192, NULL, 5, NULL);
-    
+
     ESP_LOGI(TAG, "系统启动完成");
 }
