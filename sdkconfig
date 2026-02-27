@@ -1339,6 +1339,23 @@ CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=y
 # end of ESP-Driver:USB Serial/JTAG Configuration
 
 #
+# Ethernet
+#
+# default:
+CONFIG_ETH_ENABLED=y
+CONFIG_ETH_USE_SPI_ETHERNET=y
+# default:
+# CONFIG_ETH_SPI_ETHERNET_DM9051 is not set
+CONFIG_ETH_SPI_ETHERNET_W5500=y
+# default:
+# CONFIG_ETH_SPI_ETHERNET_KSZ8851SNL is not set
+# default:
+# CONFIG_ETH_USE_OPENETH is not set
+# default:
+# CONFIG_ETH_TRANSMIT_MUTEX is not set
+# end of Ethernet
+
+#
 # Event Loop Library
 #
 # CONFIG_ESP_EVENT_LOOP_PROFILING is not set
