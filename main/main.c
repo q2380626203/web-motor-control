@@ -3,6 +3,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_netif.h"
 
 #include "motor_control.h"
 #include "wifi_http_server.h"
@@ -17,9 +18,13 @@
 #include "esp_eth_phy.h"
 #include "esp_eth_com.h"
 #include "esp_event.h"
-#include "esp_netif.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+
+// UDP测试相关头文件
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "fr_robot_protocol.h"
 
 // 函数声明
 float angle_to_position(float angle_degrees);
@@ -208,6 +213,92 @@ static void got_ip_event_handler(void *arg, esp_event_base_t event_base,
     ESP_LOGI(TAG, "~~~~~~~~~~~");
 }
 
+// ========== 法奥机器人协议 UDP 服务 ==========
+#define FR_UDP_PORT 8211
+static esp_netif_t *g_eth_netif = NULL;
+
+// 客户端地址（机器人）
+static struct sockaddr_in g_robot_addr;
+static bool g_robot_connected = false;
+
+// 运动更新任务周期 (ms)
+#define MOTION_UPDATE_MS 10
+
+static void fr_robot_server_task(void *pvParameters)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "无法创建 UDP socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(FR_UDP_PORT);
+
+    if (bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "UDP socket 绑定失败");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "法奥机器人协议服务器启动，监听端口：%d", FR_UDP_PORT);
+
+    // 接收缓冲区
+    uint8_t rx_buffer[FR_ROBOT_PACKET_SIZE];
+    socklen_t client_addr_len = sizeof(g_robot_addr);
+
+    // 帧计数
+    uint16_t frame_count = 0;
+
+    // 初始化协议模块
+    fr_protocol_init();
+
+    while (1) {
+        // 接收机器人命令
+        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0,
+                          (struct sockaddr *)&g_robot_addr, &client_addr_len);
+        if (len > 0) {
+            g_robot_connected = true;
+
+            // 解析命令包
+            fr_robot_packet_t cmd_packet;
+            if (fr_parse_robot_packet(rx_buffer, len, &cmd_packet)) {
+                ESP_LOGD(TAG, "收到机器人命令包，帧计数：%d", cmd_packet.frame_count);
+
+                // 处理各轴命令
+                for (int i = 0; i < FR_AXIS_COUNT; i++) {
+                    fr_process_axis_command(&cmd_packet.axis_cmd[i], i);
+                }
+
+                // 构建 PLC 响应包
+                fr_plc_packet_t resp_packet;
+                frame_count++;
+                fr_build_plc_response(&resp_packet, frame_count);
+
+                // 发送响应
+                sendto(sock, (uint8_t*)&resp_packet, FR_PLC_PACKET_SIZE, 0,
+                       (struct sockaddr *)&g_robot_addr, client_addr_len);
+
+                ESP_LOGD(TAG, "已发送响应包，帧计数：%d", frame_count);
+            } else {
+                ESP_LOGW(TAG, "解析机器人命令包失败，长度：%d", len);
+            }
+        }
+
+        // 定期更新运动状态（每 10ms）
+        fr_update_motion(MOTION_UPDATE_MS);
+        vTaskDelay(pdMS_TO_TICKS(MOTION_UPDATE_MS));
+    }
+
+    close(sock);
+    vTaskDelete(NULL);
+}
+
 // 电机初始化任务
 void motor_init_task(void *pvParameters) {
     // ========== 初始化电机1控制器 ==========
@@ -391,7 +482,7 @@ void motor_init_task(void *pvParameters) {
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32电机WEB控制系统启动中...");
-    
+
     // 初始化NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -400,15 +491,18 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 初始化WiFi热点
-    ESP_LOGI(TAG, "初始化WiFi热点模式");
-    wifi_init_softap();
+    // 初始化TCP/IP协议栈和事件循环（原来由WiFi初始化，现在需要手动初始化）
+    ESP_LOGI(TAG, "初始化TCP/IP协议栈");
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // WiFi功能暂时关闭，专注测试W5500以太网
+    // ESP_LOGI(TAG, "初始化WiFi热点模式");
+    // wifi_init_softap();
 
 #if CONFIG_ETH_SPI_ETHERNET_W5500
     // ========== 初始化 W5500 以太网 ==========
     ESP_LOGI(TAG, "开始初始化 W5500 以太网...");
-
-    // 注意：WiFi 已经初始化了 esp_netif 和事件循环，这里不需要重复初始化
 
     // 注册以太网事件处理器
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
@@ -419,9 +513,10 @@ void app_main(void)
     if (eth_handle == NULL) {
         ESP_LOGE(TAG, "W5500 以太网初始化失败");
     } else {
-        // 创建以太网网络接口
+        // 创建以太网网络接口（使用默认配置）
         esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
         esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
+        g_eth_netif = eth_netif;
 
         // 将以太网驱动连接到 TCP/IP 栈
         esp_eth_netif_glue_handle_t glue = esp_eth_new_netif_glue(eth_handle);
@@ -430,6 +525,29 @@ void app_main(void)
         // 启动以太网驱动
         ESP_ERROR_CHECK(esp_eth_start(eth_handle));
         ESP_LOGI(TAG, "W5500 以太网已启动");
+
+        // 等待以太网连接
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // 配置静态IP（直连电脑时需要）
+        // ESP32 IP: 192.168.1.100, 电脑需要设置为 192.168.1.x 网段
+        esp_netif_ip_info_t ip_info = {
+            .ip.addr = ESP_IP4TOADDR(192, 168, 1, 100),
+            .netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0),
+            .gw.addr = ESP_IP4TOADDR(192, 168, 1, 1),
+        };
+
+        // 停止DHCP客户端，设置静态IP
+        if (esp_netif_dhcpc_stop(eth_netif) == ESP_OK) {
+            esp_netif_set_ip_info(eth_netif, &ip_info);
+            ESP_LOGI(TAG, "W5500 静态IP已配置: 192.168.1.100");
+        } else {
+            ESP_LOGW(TAG, "无法停止DHCP客户端，静态IP设置可能失败");
+        }
+
+        // 启动法奥机器人协议服务器
+        xTaskCreate(fr_robot_server_task, "fr_robot_server", 4096, NULL, 5, NULL);
+        ESP_LOGI(TAG, "法奥机器人协议服务器任务已创建，端口: %d", FR_UDP_PORT);
     }
 #else
     ESP_LOGI(TAG, "W5500 以太网未启用（需要在 menuconfig 中启用）");
