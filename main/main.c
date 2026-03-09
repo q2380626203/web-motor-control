@@ -35,10 +35,10 @@ static const char *TAG = "MAIN";
 
 // W5500 SPI 引脚定义
 #define W5500_SPI_HOST      SPI2_HOST
-#define W5500_CS_GPIO       GPIO_NUM_1
-#define W5500_SCLK_GPIO     GPIO_NUM_2
-#define W5500_MISO_GPIO     GPIO_NUM_4  // 交换：原来是3，现在是4
-#define W5500_MOSI_GPIO     GPIO_NUM_3  // 交换：原来是4，现在是3
+#define W5500_CS_GPIO       GPIO_NUM_4
+#define W5500_SCLK_GPIO     GPIO_NUM_3
+#define W5500_MISO_GPIO     GPIO_NUM_1  // 恢复原始配置
+#define W5500_MOSI_GPIO     GPIO_NUM_2  // 恢复原始配置
 #define W5500_INT_GPIO      -1  // 不使用中断引脚，使用轮询模式
 #define W5500_PHY_RST_GPIO  -1  // 不使用复位引脚
 #define W5500_PHY_ADDR      1
@@ -131,12 +131,12 @@ static esp_eth_handle_t w5500_eth_init(void)
     // 配置 SPI 设备接口
     spi_device_interface_config_t devcfg = {
         .mode = 0,
-        .clock_speed_hz = 20 * 1000 * 1000,  // 20 MHz
+        .clock_speed_hz = 2 * 1000 * 1000,  // 2 MHz (降低速度以提高稳定性)
         .queue_size = 20,
         .spics_io_num = W5500_CS_GPIO
     };
 
-    ESP_LOGI(TAG, "配置 W5500 SPI 设备: CS=%d, 时钟=20MHz", W5500_CS_GPIO);
+    ESP_LOGI(TAG, "配置 W5500 SPI 设备: CS=%d, 时钟=2MHz", W5500_CS_GPIO);
 
     // 初始化 MAC 和 PHY 配置
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
@@ -438,7 +438,7 @@ void motor_init_task(void *pvParameters) {
     ESP_LOGI(TAG, "========== 开始配置电机运行参数 ==========");
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 1. 设置电机1为速度模式
+    // // 1. 设置电机1为速度模式
     // ESP_LOGI(TAG, "[电机1] 设置为速度模式...");
     // motor_control_set_velocity_mode(motor_controller_1);
     // vTaskDelay(pdMS_TO_TICKS(1000));  // 指令间隔5ms
@@ -503,6 +503,10 @@ void app_main(void)
 #if CONFIG_ETH_SPI_ETHERNET_W5500
     // ========== 初始化 W5500 以太网 ==========
     ESP_LOGI(TAG, "开始初始化 W5500 以太网...");
+
+    // 等待 W5500 芯片上电稳定
+    ESP_LOGI(TAG, "等待 W5500 上电稳定...");
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // 注册以太网事件处理器
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
