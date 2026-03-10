@@ -255,7 +255,7 @@ static void fr_robot_server_task(void *pvParameters)
     // 帧计数
     uint16_t frame_count = 0;
 
-    // 初始化协议模块
+    // 初始化协议模块（motor绑定在motor_init_task完成后调用）
     fr_protocol_init();
 
     while (1) {
@@ -333,7 +333,10 @@ void motor_init_task(void *pvParameters) {
 
     // 设置主控制器为电机1（用于Web界面）
     motor_controller = motor_controller_1;
-    
+
+    // 绑定电机1到法奥协议轴1（等电机初始化完成后才能绑定）
+    fr_protocol_set_motor(motor_controller_1);
+
     // 等待2秒让电机稳定
     vTaskDelay(pdMS_TO_TICKS(2000));
 
@@ -534,17 +537,17 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         // 配置静态IP（直连电脑时需要）
-        // ESP32 IP: 192.168.1.100, 电脑需要设置为 192.168.1.x 网段
-        esp_netif_ip_info_t ip_info = {
-            .ip.addr = ESP_IP4TOADDR(192, 168, 1, 100),
-            .netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0),
-            .gw.addr = ESP_IP4TOADDR(192, 168, 1, 1),
-        };
+        // ESP32 IP: 172.16.2.100, 电脑需要设置为 172.16.2.x 网段
+        esp_netif_ip_info_t ip_info;
+        memset(&ip_info, 0, sizeof(ip_info));
+        IP4_ADDR(&ip_info.ip,      172,  16, 2, 100);
+        IP4_ADDR(&ip_info.netmask, 255, 255, 255,  0);
+        IP4_ADDR(&ip_info.gw,      172,  16, 2,   1);
 
         // 停止DHCP客户端，设置静态IP
         if (esp_netif_dhcpc_stop(eth_netif) == ESP_OK) {
             esp_netif_set_ip_info(eth_netif, &ip_info);
-            ESP_LOGI(TAG, "W5500 静态IP已配置: 192.168.1.100");
+            ESP_LOGI(TAG, "W5500 静态IP已配置: 172.16.2.100");
         } else {
             ESP_LOGW(TAG, "无法停止DHCP客户端，静态IP设置可能失败");
         }

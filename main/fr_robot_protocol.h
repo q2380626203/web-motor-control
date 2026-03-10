@@ -14,6 +14,18 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "motor_control.h"
+
+// ==================== 换算参数 ====================
+// FR协议（法奥机器人示教器扩展轴配置）
+#define FR_LEAD_MM_PER_REV      14.990f     // 丝杠导程 (mm/圈)
+#define FR_ENCODER_PULSES       262144      // 编码器分辨率 (脉冲/圈)
+// TWAI 电机
+#define MOTOR_MM_PER_REV        0.972f      // 电机1圈对应线性位移 (mm/圈)，实测校准值
+#define MAX_STEP_REV            40.0f       // 单步最大移动量 (转)
+
+// FR脉冲 → 电机转数: rev = pulses × FR_LEAD_MM_PER_REV / (FR_ENCODER_PULSES × MOTOR_MM_PER_REV)
+#define FR_PULSES_TO_REV   (FR_LEAD_MM_PER_REV / ((float)FR_ENCODER_PULSES * MOTOR_MM_PER_REV))
 
 // ==================== 协议常量 ====================
 #define FR_FRAME_HEADER         0x5A5A
@@ -108,8 +120,8 @@ typedef struct {
     bool enabled;               // 使能状态
     bool homing;                // 回零中
     bool home_done;             // 回零完成
-    int32_t current_position;   // 当前位置
-    int32_t target_position;    // 目标位置
+    int32_t current_position;   // 当前位置（脉冲）
+    int32_t target_position;    // 目标位置（脉冲）
     int32_t speed;              // 当前速度
     int16_t fault_code;         // 故障码
 } fr_axis_state_t;
@@ -158,6 +170,12 @@ uint16_t fr_calc_crc16(const uint8_t *data, int len);
  * @brief 初始化协议模块
  */
 void fr_protocol_init(void);
+
+/**
+ * @brief 绑定 TWAI 电机控制器（轴1对应电机1）
+ * @param ctrl motor_controller_t 指针
+ */
+void fr_protocol_set_motor(motor_controller_t *ctrl);
 
 /**
  * @brief 更新轴运动（周期调用）

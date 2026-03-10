@@ -1,5 +1,6 @@
 #include "uart_monitor.h"
 #include "motor_control.h"
+#include "fr_robot_protocol.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -68,8 +69,12 @@ static void parse_motor_can_data(const uint8_t *data, int length) {
         return;
     }
 
-    ESP_LOGI(TAG, "解析电机CAN响应 - 电机ID:%d, CAN ID:0x%04X, 数据: %02X %02X %02X %02X %02X %02X %02X %02X",
+    // 原始帧数据改为 DEBUG 级别，正常运行时不显示
+    ESP_LOGD(TAG, "解析电机CAN响应 - 电机ID:%d, CAN ID:0x%04X, 数据: %02X %02X %02X %02X %02X %02X %02X %02X",
              motor_id, can_id, data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+
+    // 位置速度查询计数器（10ms周期，1000次 = 10秒）
+    static uint32_t pos_log_cnt = 0;
 
     // 根据基础ID调用对应的解析函数
     switch (base_id) {
@@ -93,8 +98,14 @@ static void parse_motor_can_data(const uint8_t *data, int length) {
 
         case BASE_QUERY_POS_SPEED_ID:   // 0x0029 位置速度查询响应
             parse_position_speed_data(&data[2], status);
-            ESP_LOGI(TAG, "[电机%d] 位置速度数据 - 位置: %.3f, 速度: %.3f",
-                     motor_id, status->position, status->velocity);
+            // 10秒打印一次（FR运动控制以100Hz查询，1000次=10秒）
+            if (++pos_log_cnt >= 1000) {
+                pos_log_cnt = 0;
+                ESP_LOGI(TAG, "[电机%d] 位置速度数据 - 位置: %.3f转 (%.2fmm), 速度: %.3f转/s",
+                         motor_id, status->position,
+                         status->position * MOTOR_MM_PER_REV,
+                         status->velocity);
+            }
             break;
 
         case BASE_QUERY_EXCEPTION_ID:   // 0x0023 异常查询响应
@@ -151,8 +162,8 @@ static void uart_monitor_task(void *pvParameters) {
                 uint8_t motor_id;
                 uint16_t base_id;
                 if (decode_motor_response_id(rx_msg.identifier, &motor_id, &base_id)) {
-                    // 打印接收信息
-                    ESP_LOGI(monitor->config.tag, "[#%lu] 电机%d响应 ID=0x%03lX: %02X %02X %02X %02X %02X %02X %02X %02X",
+                    // 原始帧日志改为 DEBUG 级别
+                    ESP_LOGD(monitor->config.tag, "[#%lu] 电机%d响应 ID=0x%03lX: %02X %02X %02X %02X %02X %02X %02X %02X",
                              msg_count, motor_id, rx_msg.identifier,
                              rx_msg.data[0], rx_msg.data[1], rx_msg.data[2], rx_msg.data[3],
                              rx_msg.data[4], rx_msg.data[5], rx_msg.data[6], rx_msg.data[7]);

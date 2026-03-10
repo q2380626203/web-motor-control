@@ -272,7 +272,7 @@ static void send_can_frame(const char* cmd_name, uint32_t base_id, const uint8_t
     // 发送CAN消息
     esp_err_t result = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));  // 1秒超时
     if (result == ESP_OK) {
-        printf("[CAN] 发送成功: %s [电机%d], ID:0x%04lX, 数据长度:%d\n",
+        ESP_LOGD("CAN", "[CAN] 发送成功: %s [电机%d], ID:0x%04lX, 数据长度:%d",
                cmd_name, motor_id, (unsigned long)actual_id, len);
     } else {
         printf("[CAN错误] 发送失败: %s [电机%d], ID:0x%04lX, 错误:%s\n",
